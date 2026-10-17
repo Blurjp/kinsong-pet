@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Kinsong Pets",
+    "slug": "kinsong-pets",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "app.kinsong.pets",
+      "supportsTablet": false,
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+    },
+    "android": { "package": "app.kinsong.pets" },
+    "web": { "bundler": "metro", "output": "single" }
+  }
+}
