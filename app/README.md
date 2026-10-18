@@ -11,6 +11,7 @@ Why pets come first: see [docs/MEMORIAL_GARDEN.md §8](../docs/MEMORIAL_GARDEN.m
 | **Setup** | Name, species (dog, cat, rabbit, bird, other), coat and marking colours, the day they passed, an optional birthday and gotcha day, and their favorite toys, treats, spots and personality. |
 | **Garden: they live there** | Your pet lives in the meadow on its own: it wanders, sniffs the flowers you planted, naps under the memory tree, plays with its favorite toy, and watches the rainbow. How often it does each depends on species and the words you used ("lazy" naps more, "goofy" plays more). After 9 pm it sleeps under the stars. |
 | **Garden: interact** | **Pet** them (button, or tap them), **call** their name (they come to you), **play** with their toy, **give a treat** (they go to the bowl and eat). Each reaction plays one of **your own recordings** (a bark when called, a purr when petted), with little hearts. |
+| **Memories: videos** | Add short **video clips** (up to 8 s each, trimmed in the picker) and tag what the pet is doing in each: sitting, walking, playing, barking, sleeping, eating. The phone cuts the pet out of every frame (Apple Vision, iOS 17+) and from then on the garden shows **the real pet from your footage** instead of the storybook figure: it plays the clip that matches what it's doing, and a barking clip barks with its own sound when you call. It can only do what your clips show. If the pet can't be separated from the background, the clip shows in a soft frame instead. |
 | **Memories** | Add **photos**: they hang as polaroids in the garden, open full-screen with a slow drift and one of their sounds, and the first one sets the storybook pet's coat and marking colours automatically ("Use colours" on any photo). Add **recordings** and tag each (bark, whine, purr, meow, chirp, happy…) so the right sound plays for each reaction. Sounds can be switched off. |
 | **Garden: leave something** | An illustrated meadow by the Rainbow Bridge. **Light a candle** (lit for the day), **plant a flower** (stays forever and grows a little each year), **leave a treat** (shows for a week), **write a letter** (goes in the mailbox). The memory tree gains a ring for every year you come back. On remembrance days a gentle banner appears, with an imagined note "from" them built only from what you wrote. |
 | **Wishes** | Things they never got to do ("chase the seagulls at the beach"). Each wish gets an **imagined postcard** (beach, snow, forest, lake, sky or meadow, chosen from the words), always labelled as imagined. When you do it for them in real life, mark it done. |
@@ -20,10 +21,10 @@ Why pets come first: see [docs/MEMORIAL_GARDEN.md §8](../docs/MEMORIAL_GARDEN.m
 
 - **Nothing is for sale.** Flowers, candles, treats and letters are always free, with no rarity and no "more gifts = happier pet".
 - **No streaks, no guilt.** The only nudge is on a remembrance day (`gentleNudge` returns nothing on ordinary days).
-- **Imagined things are labelled.** Postcards and notes are always marked as imagined, and the pet is a storybook illustration, not a photo.
+- **Imagined things are labelled.** Postcards and notes are always marked as imagined. The pet is a storybook illustration unless you add video clips; then it is your own footage, cut out of its background, never generated or retouched.
 - **The garden only grows.** Nothing withers if you stay away.
 - **They're always content.** The pet never gets hungry, lonely or sad and never "waits" for you, so nothing depends on how long you've been away (`core/src/petLife.ts`, tested).
-- **Their real voice, untouched.** Recordings are played back as-is; nothing is synthesised. Captions describe what the simulated pet does ("Max comes running"); the pet doesn't talk, except in the clearly labelled imagined notes.
+- **Their real voice, untouched.** Recordings, and the sound of video clips, are played back as-is; nothing is synthesised. Captions describe what the simulated pet does ("Max comes running"); the pet doesn't talk, except in the clearly labelled imagined notes.
 - **Labelled as a simulation** under the scene.
 - **Everything stays on the phone** (AsyncStorage for data; photos and recordings in the app's documents folder on iOS/Android; small data URIs in the web preview).
 
@@ -34,14 +35,15 @@ cd ../core && npm install
 cd ../app && npm install
 npm run web          # preview in a browser
 npm test             # 13 app tests; garden and pet-life logic tests live in ../core/test/{garden,petLife}.test.ts
-npx expo start       # Expo Go works: no custom native modules
+npx expo start       # Expo Go works for everything except video clips
+npx expo run:ios     # video clips need the local native module in modules/pet-cutout
 ```
 
 ## Not in the prototype yet
 
 - Local notifications on remembrance days (`expo-notifications`). The days are computed, but nothing is scheduled.
-- **A photo-real moving likeness.** Today the pet is a storybook figure tinted from your photo, and your real photos appear beside it. Animating the actual photo (an animal "live portrait") needs a model that is too heavy for most phones today; the plan is an opt-in step on a family-run computer, or on-device once models shrink. Same consent and deletion rules as everything else.
-- Video clips (photos and audio only for now).
+- **New movement the footage doesn't show.** With video clips the pet looks exactly like the real one but only does what the clips show. Generating new actions in its likeness (an animal "live portrait" or video model) needs a model that is too heavy for most phones today; the plan is an opt-in step on a family-run computer, or on-device once models shrink. Same consent and deletion rules as everything else.
+- Video cut-outs on Android (the native module is iOS only; Android shows the storybook pet).
 - Sharing a garden with family (end-to-end-encrypted sync), and exporting a memory book.
 - Real-world tie-ins from the research: flowers delivered to a real resting place, planting a real tree.
 - Localisation (English only), a date picker instead of typed dates, and a designed icon (`assets/icon.png` is a placeholder).

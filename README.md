@@ -1,6 +1,6 @@
 # Kinsong Pet
 
-A quiet memorial garden by the Rainbow Bridge for a pet who has passed. The pet lives there: it wanders, naps under the memory tree, plays with its favorite toy, and sleeps under the stars at night. It comes when you call, using **your own photos and recordings** of it. Everything stays on the phone.
+A quiet memorial garden by the Rainbow Bridge for a pet who has passed. The pet lives there: it wanders, naps under the memory tree, plays with its favorite toy, and sleeps under the stars at night. It comes when you call, using **your own photos, videos and recordings** of it. Add a short video and the garden shows the real pet, cut out of your footage on the phone. Everything stays on the phone.
 
 - `app/` is the Expo (React Native) app. See [app/README.md](app/README.md) for features and product rules.
 - `core/` is the pure TypeScript logic shared with the app: remembrance days, the garden, the pet's behaviour, and reading colours from a photo. It has unit tests.
@@ -18,7 +18,7 @@ npm run web                             # quick look in a browser
 
 ### iOS Simulator (needs a Mac with Xcode)
 
-The app only uses modules that ship in Expo Go, so the quickest way is:
+Everything except video clips works in Expo Go, so the quickest way is:
 
 ```sh
 cd app

@@ -9,6 +9,9 @@
  *    pet does not talk, and nothing claims to be the real animal.
  *  - Its voice is the family's own recordings, played back as-is. Nothing
  *    is synthesised.
+ *  - With video clips, it looks and moves exactly as in the family's own
+ *    footage: the real frames, cut out of their background. It can only do
+ *    what the footage shows; no new movement is generated.
  */
 
 import type { RgbaImage } from "./likeness";
@@ -31,6 +34,34 @@ export interface PetPhoto {
   id: string;
   uri: string;
   addedOn: string;
+}
+
+/** What a clip from the family's own video shows the pet doing. */
+export type ClipAction = "sit" | "walk" | "play" | "bark" | "sleep" | "eat";
+
+export const CLIP_ACTIONS: readonly ClipAction[] = ["sit", "walk", "play", "bark", "sleep", "eat"];
+
+/**
+ * A short clip from the family's own video, cut out of its background on the
+ * phone. The frames are the real footage, packed into one sprite sheet; the
+ * sound is the clip's own audio, untouched. Nothing is generated.
+ */
+export interface VideoClip {
+  id: string;
+  action: ClipAction;
+  /** Folder holding the sheet and audio, so the clip can be forgotten in one go. */
+  dir: string;
+  /** Frames laid out left→right, top→bottom, `cols` per row. */
+  sheetUri: string;
+  frameCount: number;
+  cols: number;
+  fps: number;
+  /** One frame's size in pixels. The pet's feet touch the bottom edge. */
+  width: number;
+  height: number;
+  /** False when the pet couldn't be separated from the background, so frames keep it. */
+  cutout: boolean;
+  audioUri?: string;
 }
 
 /** A point in the meadow: x 0..1 left→right, depth 0 (far) → 1 (near). */
@@ -175,11 +206,20 @@ export interface Reaction {
   caption: string;
   /** Recording tags to try, in order. */
   sounds: SoundTag[];
+  /** Video clip actions to try, in order. */
+  clips: ClipAction[];
   /** Small floating hearts in the scene. */
   hearts: boolean;
 }
 
 type ReactionText = Partial<Record<Species, string>> & { default: string };
+
+const REACTION_CLIPS: Record<Interaction, ClipAction[]> = {
+  pet: ["play", "sit"],
+  call: ["bark", "play"],
+  play: ["play", "bark"],
+  treat: ["eat", "sit"],
+};
 
 const REACTIONS: Record<Interaction, { text: ReactionText; sounds: Partial<Record<Species, SoundTag[]>> & { default: SoundTag[] }; pose: Pose; at: (c: ReactContext) => Spot }> = {
   pet: {
@@ -246,8 +286,37 @@ export function react(i: Interaction, c: ReactContext): Reaction {
     seconds: 5,
     caption: text,
     sounds: r.sounds[c.species] ?? r.sounds.default,
+    clips: REACTION_CLIPS[i],
     hearts: i === "pet" || i === "call",
   };
+}
+
+const POSE_CLIPS: Record<Pose, ClipAction[]> = {
+  sit: ["sit"],
+  walk: ["walk"],
+  sleep: ["sleep"],
+  happy: ["play", "bark"],
+  eat: ["eat"],
+};
+
+/** Clip actions to try for a pose, in order. */
+export function clipActionsFor(pose: Pose): ClipAction[] {
+  return POSE_CLIPS[pose];
+}
+
+/**
+ * Choose one of the family's video clips: the first preferred action that has
+ * clips, then a sitting clip (calm enough to stand in for anything), then any
+ * clip at all, so the pet always looks like itself once there is footage.
+ */
+export function pickVideoClip(clips: readonly VideoClip[], prefer: readonly ClipAction[], seed: number): VideoClip | undefined {
+  if (!clips.length) return undefined;
+  const r = rng(seed);
+  for (const action of [...prefer, "sit" as const]) {
+    const matching = clips.filter((c) => c.action === action);
+    if (matching.length) return matching[Math.floor(r() * matching.length)];
+  }
+  return clips[Math.floor(r() * clips.length)];
 }
 
 /**

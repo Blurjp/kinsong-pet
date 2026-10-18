@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import {
   FLOWER_KINDS,
+  clipActionsFor,
   gardenState,
   gentleNudge,
   imaginedNote,
@@ -9,7 +10,9 @@ import {
   nextMoment,
   occasionsOn,
   pickSound,
+  pickVideoClip,
   react,
+  type ClipAction,
   type FlowerKind,
   type Interaction,
   type PetPhoto,
@@ -40,6 +43,9 @@ interface Live {
   at: Spot;
   pose: Pose;
   caption: string;
+  /** Which video clips suit a reaction; otherwise they follow the pose. */
+  clips?: ClipAction[];
+  seed: number;
 }
 
 export function GardenScreen({
@@ -75,8 +81,9 @@ export function GardenScreen({
   );
   const [live, setLive] = useState<Live>(() => {
     const m = nextMoment({ ...ctx, seed: seed0 });
-    return { at: m.at, pose: m.pose === "walk" ? "sit" : m.pose, caption: m.caption };
+    return { at: m.at, pose: m.pose === "walk" ? "sit" : m.pose, caption: m.caption, seed: seed0 };
   });
+  const clip = useMemo(() => pickVideoClip(state.clips, live.clips ?? clipActionsFor(live.pose), live.seed), [state.clips, live]);
   const [holdUntil, setHoldUntil] = useState(0); // pause the life loop while a reaction plays out
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(settle.current), []);
@@ -89,10 +96,10 @@ export function GardenScreen({
       const m = nextMoment({ ...ctx, seed: nextSeed() });
       const dist = Math.hypot(m.at.x - live.at.x, m.at.depth - live.at.depth);
       const moving = dist > 0.03 && m.pose !== "sleep";
-      setLive({ at: m.at, pose: moving ? "walk" : m.pose, caption: m.caption });
+      setLive({ at: m.at, pose: moving ? "walk" : m.pose, caption: m.caption, seed: nextSeed() });
       if (moving && m.pose !== "walk") {
         clearTimeout(settle.current);
-        settle.current = setTimeout(() => setLive((l) => (l.at === m.at ? { ...l, pose: m.pose } : l)), 700 + dist * 3200);
+        settle.current = setTimeout(() => setLive((l) => (l.at === m.at ? { ...l, pose: m.pose, seed: nextSeed() } : l)), 700 + dist * 3200);
       }
     }, wait + (live.pose === "walk" ? 4000 : 8000));
     return () => clearTimeout(t);
@@ -103,15 +110,20 @@ export function GardenScreen({
   const respond = useCallback(
     (i: Interaction, treat?: string) => {
       const r = react(i, { name: pet.name, species: pet.species, here: live.at, toy, treat });
-      setLive({ at: r.at, pose: r.pose, caption: r.caption });
+      const seed = nextSeed();
+      setLive({ at: r.at, pose: r.pose, caption: r.caption, clips: r.clips, seed });
       setHoldUntil(Date.now() + r.seconds * 1000);
       if (r.hearts) setHeartsKey((k) => (k ?? 0) + 1);
-      const clip = state.soundOn ? pickSound(state.sounds, r.sounds, nextSeed()) : undefined;
-      if (clip) play(clip.uri);
+      if (!state.soundOn) return;
+      // A bark clip brings its own bark; otherwise their recordings, then whatever the footage sounds like.
+      const shown = pickVideoClip(state.clips, r.clips, seed);
+      const recording = pickSound(state.sounds, r.sounds, nextSeed());
+      const uri = shown?.action === "bark" && shown.audioUri ? shown.audioUri : (recording?.uri ?? shown?.audioUri);
+      if (uri) play(uri);
     },
     // nextSeed only touches a ref
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds],
+    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips],
   );
 
   // Every gesture is free and leaves something that stays.
@@ -135,6 +147,7 @@ export function GardenScreen({
         garden={garden}
         at={live.at}
         pose={live.pose}
+        clip={clip}
         night={night}
         photos={state.photos}
         heartsKey={heartsKey}
@@ -146,6 +159,7 @@ export function GardenScreen({
       </Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>
         ✦ A simulation of {pet.name}
+        {clip ? ", made from your own video" : ""}
         {state.sounds.length ? ", with your own recordings of their voice" : ""}.
       </Text>
 

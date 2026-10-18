@@ -14,8 +14,9 @@ import Svg, {
   Stop,
   Text as SvgText,
 } from "react-native-svg";
-import type { GardenState, PetPhoto, PetProfile, Pose, Spot } from "@sinian/core";
+import type { GardenState, PetPhoto, PetProfile, Pose, Spot, VideoClip } from "@sinian/core";
 import { PetSprite } from "./PetSprite";
+import { ClipPlayer } from "./ClipPlayer";
 import { Flower } from "./Flower";
 
 const W = 400;
@@ -33,6 +34,8 @@ export interface SceneProps {
   garden: GardenState;
   at: Spot;
   pose: Pose;
+  /** A clip from the family's own video to show instead of the storybook pet. */
+  clip?: VideoClip;
   night: boolean;
   photos: readonly PetPhoto[];
   /** Changes each time hearts should float up. */
@@ -42,7 +45,7 @@ export interface SceneProps {
 }
 
 /** The meadow by the Rainbow Bridge, with the pet living in it. */
-export function GardenScene({ pet, garden, at, pose, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
+export function GardenScene({ pet, garden, at, pose, clip, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
   const [k, setK] = useState(0); // px per scene unit, known after layout
 
   return (
@@ -130,7 +133,7 @@ export function GardenScene({ pet, garden, at, pose, night, photos, heartsKey, o
         ))}
       </Svg>
 
-      {k > 0 && <LivingPet pet={pet} at={at} pose={pose} k={k} heartsKey={heartsKey} onPress={onPetPress} />}
+      {k > 0 && <LivingPet pet={pet} at={at} pose={pose} clip={clip} k={k} heartsKey={heartsKey} onPress={onPetPress} />}
 
       {/* near flowers stand in front of the pet */}
       <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }} pointerEvents="none">
@@ -153,9 +156,26 @@ function polaroid(i: number) {
 /**
  * The pet in its own animated layer. Movement is a straight walk between
  * spots; it faces the way it is going, bobs while walking, breathes while
- * resting, and grows slightly as it comes nearer.
+ * resting, and grows slightly as it comes nearer. With a video clip, the
+ * footage supplies its own movement, so it doesn't bob.
  */
-function LivingPet({ pet, at, pose, k, heartsKey, onPress }: { pet: PetProfile; at: Spot; pose: Pose; k: number; heartsKey?: number; onPress?: () => void }) {
+function LivingPet({
+  pet,
+  at,
+  pose,
+  clip,
+  k,
+  heartsKey,
+  onPress,
+}: {
+  pet: PetProfile;
+  at: Spot;
+  pose: Pose;
+  clip?: VideoClip;
+  k: number;
+  heartsKey?: number;
+  onPress?: () => void;
+}) {
   const [ax] = useState(() => new Animated.Value(at.x));
   const [ad] = useState(() => new Animated.Value(at.depth));
   const [bob] = useState(() => new Animated.Value(0));
@@ -209,9 +229,10 @@ function LivingPet({ pet, at, pose, k, heartsKey, onPress }: { pet: PetProfile; 
   return (
     <Animated.View style={{ position: "absolute", left: 0, top: 0, width: box, height: box, transform: [{ translateX }, { translateY }, { scale }] }}>
       <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Pet ${pet.name}`} style={{ flex: 1 }}>
-        <Animated.View style={{ flex: 1, transform: [{ translateY: pose === "sleep" ? 0 : lift }] }}>
-          <Svg width="100%" height="100%" viewBox="0 0 100 100">
-            <PetSprite species={pet.species} coat={pet.coat} accent={pet.accent} x={50} y={50} size={100} pose={pose} flip={flip} />
+        <Animated.View style={{ flex: 1, transform: [{ translateY: pose === "sleep" || clip ? 0 : lift }] }}>
+          {clip && <ClipPlayer clip={clip} size={box} flip={flip} />}
+          <Svg width="100%" height="100%" viewBox="0 0 100 100" style={clip ? { position: "absolute", left: 0, top: 0 } : undefined}>
+            {!clip && <PetSprite species={pet.species} coat={pet.coat} accent={pet.accent} x={50} y={50} size={100} pose={pose} flip={flip} />}
             {pose === "sleep" && (
               <G>
                 <SvgText x={62} y={52} fontSize={11} fill="#fff" opacity={0.9}>z</SvgText>

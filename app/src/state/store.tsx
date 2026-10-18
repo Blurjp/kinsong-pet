@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { PetPhoto, PetProfile, SoundClip, Visit } from "@sinian/core";
+import type { PetPhoto, PetProfile, SoundClip, VideoClip, Visit } from "@sinian/core";
 
 /** Everything stays on the device. One pet per install for the prototype. */
 export interface PetState {
@@ -10,12 +10,14 @@ export interface PetState {
   photos: PetPhoto[];
   /** The family's own recordings of the pet: barks, purrs, chirps. */
   sounds: SoundClip[];
+  /** Clips from the family's own videos; once there are any, the garden shows the real pet. */
+  clips: VideoClip[];
   /** Play recordings when the pet reacts. */
   soundOn: boolean;
 }
 
 const KEY = "kinsong-pets/v1";
-const EMPTY: PetState = { visits: [], photos: [], sounds: [], soundOn: true };
+const EMPTY: PetState = { visits: [], photos: [], sounds: [], clips: [], soundOn: true };
 
 export async function loadState(): Promise<PetState> {
   try {

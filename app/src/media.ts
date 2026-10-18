@@ -5,16 +5,19 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { Directory, File, Paths } from "expo-file-system";
 import { createAudioPlayer } from "expo-audio";
 import { decode as decodeJpeg } from "jpeg-js";
-import { base64ToBytes, coatColorsFromImage } from "@sinian/core";
+import { base64ToBytes, coatColorsFromImage, type VideoClip } from "@sinian/core";
+import { PetCutout } from "../modules/pet-cutout";
 
 /**
- * Photos and recordings of the pet. Everything stays on the device:
+ * Photos, recordings and video clips of the pet. Everything stays on the device:
  * native builds copy files into the app's private documents folder; the
  * web preview keeps small data URIs in local storage.
  */
 
 const isWeb = Platform.OS === "web";
 const MAX_WEB_AUDIO_BYTES = 1_500_000;
+/** 8 s at 12 fps is the most frames the cut-out keeps. */
+const CLIP_SECONDS = 8;
 
 function mediaDir(): Directory {
   const d = new Directory(Paths.document, "pet-media");
@@ -62,14 +65,35 @@ export async function pickRecording(): Promise<string | undefined> {
   return keepNative(a.uri, `sound-${Date.now()}.${ext}`);
 }
 
-/** Remove a stored file (no-op for web data URIs). */
+/** Remove a stored file or clip folder (no-op for web data URIs). */
 export function forget(uri: string): void {
   if (isWeb || !uri.startsWith("file:")) return;
   try {
-    const f = new File(uri);
+    const f = uri.endsWith("/") ? new Directory(uri) : new File(uri);
     if (f.exists) f.delete();
   } catch {
     // already gone
+  }
+}
+
+/**
+ * Let the owner choose a short video of their pet (trimmed in the picker), and
+ * cut the pet out of it on the phone. The garden then shows these real frames.
+ */
+export async function importVideoClip(): Promise<Omit<VideoClip, "id" | "action"> | undefined> {
+  if (!PetCutout) throw new Error("Video clips need the installed app. They don't work in the web preview or Expo Go.");
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsEditing: true, videoMaxDuration: CLIP_SECONDS });
+  const a = r.canceled ? undefined : r.assets[0];
+  if (!a) return undefined;
+  const dir = new Directory(mediaDir(), `clip-${Date.now()}`);
+  dir.create();
+  try {
+    const out = await PetCutout.cutOut(a.uri, dir.uri, { fps: 12, maxSeconds: CLIP_SECONDS, frameSize: 240 });
+    // A trailing slash marks it as a folder for forget().
+    return { dir: dir.uri.endsWith("/") ? dir.uri : `${dir.uri}/`, ...out };
+  } catch (e) {
+    dir.delete();
+    throw e;
   }
 }
 
