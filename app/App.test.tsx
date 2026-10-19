@@ -104,6 +104,13 @@ describe("Kinsong Pets", () => {
     expect(screen.getByText(/A simulation of Max, made from your own video/)).toBeTruthy();
   });
 
+  it("lives in the photographed meadow once there's footage, with the family's photos laid out below", async () => {
+    await render(<PetsApp initial={seeded({ clips: [barkClip], photos: [{ id: "p1", uri: "file:///photos/max-1.jpg", addedOn: t }] })} />);
+    await layout();
+    await fireEvent.press(screen.getByLabelText("Open photo"));
+    expect(played).toHaveBeenCalled(); // the photo viewer plays one of their sounds
+  });
+
   it("walks over at a real pace before barking, when there's footage of it walking", async () => {
     jest.useFakeTimers();
     try {

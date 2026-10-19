@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { Image, Pressable, Text, View } from "react-native";
 import {
   FLOWER_KINDS,
   canTravel,
@@ -188,6 +188,18 @@ export function GardenScreen({
         onPetPress={() => respond("pet")}
         onPhotoPress={setViewing}
       />
+      {clip && state.photos.length > 0 && (
+        // In the photographed meadow the family's photos sit under the scene, like prints laid out.
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+          {state.photos.slice(0, 5).map((p, i) => (
+            <Pressable key={p.id} onPress={() => setViewing(p)} accessibilityLabel="Open photo" style={{ transform: [{ rotate: `${[-4, 3, -2, 4, -3][i]}deg` }] }}>
+              <View style={{ backgroundColor: "#fffdf8", padding: 3, paddingBottom: 9, borderRadius: 2, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } }}>
+                <Image source={{ uri: p.uri }} style={{ width: 46, height: 46 }} />
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <Text style={{ color: colors.ink, fontSize: 15, marginTop: 8, minHeight: 40 }} accessibilityLiveRegion="polite">
         {caption}
       </Text>
