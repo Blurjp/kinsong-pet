@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import {
   FLOWER_KINDS,
+  canTravel,
   clipActionsFor,
+  clipCaption,
   gardenState,
   gentleNudge,
   imaginedNote,
@@ -18,11 +20,12 @@ import {
   type PetPhoto,
   type PetProfile,
   type Pose,
+  type Reaction,
   type Spot,
   type Visit,
 } from "@sinian/core";
 import { newId, today, useStore } from "../state/store";
-import { GardenScene } from "../components/GardenScene";
+import { GardenScene, walkMs } from "../components/GardenScene";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { play } from "../media";
 import { Button, Card, Chip, Field, Note, colors, s } from "../ui";
@@ -36,6 +39,9 @@ const FLOWER_LABEL: Record<FlowerKind, string> = {
 };
 
 type Panel = "flower" | "treat" | "letter" | undefined;
+
+/** Where the real pet stays when there's no footage of it walking: a real animal can't glide. */
+const REAL_HOME: Spot = { x: 0.58, depth: 0.62 };
 /** Omit applied to each member of the Visit union, so kind-specific fields survive. */
 type NewVisit = Visit extends infer V ? (V extends Visit ? Omit<V, "id" | "on"> : never) : never;
 
@@ -45,6 +51,8 @@ interface Live {
   caption: string;
   /** Which video clips suit a reaction; otherwise they follow the pose. */
   clips?: ClipAction[];
+  /** The real pet couldn't go where the caption says, so describe the footage instead. */
+  stayed?: boolean;
   seed: number;
 }
 
@@ -79,11 +87,23 @@ export function GardenScreen({
     () => ({ name: pet.name, species: pet.species, traits: pet.traits, hour, flowers: garden.flowers, toy }),
     [pet.name, pet.species, pet.traits, hour, garden.flowers, toy],
   );
+  // With footage, the garden shows the real pet, which only changes place when it can be seen walking.
+  const real = state.clips.length > 0;
+  const travel = canTravel(state.clips);
+  const place = (at: Spot) => (real && !travel ? REAL_HOME : at);
+  const stayed = (at: Spot) => place(at) !== at;
+  const walkTime = (from: Spot, to: Spot) => (real ? walkMs(from, to) : 700 + Math.hypot(to.x - from.x, to.depth - from.depth) * 3200);
+
   const [live, setLive] = useState<Live>(() => {
     const m = nextMoment({ ...ctx, seed: seed0 });
-    return { at: m.at, pose: m.pose === "walk" ? "sit" : m.pose, caption: m.caption, seed: seed0 };
+    return { at: place(m.at), pose: m.pose === "walk" ? "sit" : m.pose, caption: m.caption, stayed: stayed(m.at), seed: seed0 };
   });
-  const clip = useMemo(() => pickVideoClip(state.clips, live.clips ?? clipActionsFor(live.pose), live.seed), [state.clips, live]);
+  const wanted = live.clips ?? clipActionsFor(live.pose);
+  const clip = pickVideoClip(state.clips, wanted, live.seed);
+  // The real pet's caption says what the footage shows: on its way somewhere, it's walking.
+  const literal = clip && (live.stayed || live.pose === "walk" || !wanted.includes(clip.action));
+  const caption = clip && literal ? clipCaption(pet.name, clip.action, night) : live.caption;
+  const [restartKey, setRestartKey] = useState(0);
   const [holdUntil, setHoldUntil] = useState(0); // pause the life loop while a reaction plays out
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(settle.current), []);
@@ -94,12 +114,12 @@ export function GardenScreen({
     const wait = Math.max(0, holdUntil - Date.now());
     const t = setTimeout(() => {
       const m = nextMoment({ ...ctx, seed: nextSeed() });
-      const dist = Math.hypot(m.at.x - live.at.x, m.at.depth - live.at.depth);
-      const moving = dist > 0.03 && m.pose !== "sleep";
-      setLive({ at: m.at, pose: moving ? "walk" : m.pose, caption: m.caption, seed: nextSeed() });
+      const at = place(m.at);
+      const moving = Math.hypot(at.x - live.at.x, at.depth - live.at.depth) > 0.03 && (real || m.pose !== "sleep");
+      setLive({ at, pose: moving ? "walk" : m.pose, caption: m.caption, stayed: stayed(m.at), seed: nextSeed() });
       if (moving && m.pose !== "walk") {
         clearTimeout(settle.current);
-        settle.current = setTimeout(() => setLive((l) => (l.at === m.at ? { ...l, pose: m.pose, seed: nextSeed() } : l)), 700 + dist * 3200);
+        settle.current = setTimeout(() => setLive((l) => (l.at === at ? { ...l, pose: m.pose, seed: nextSeed() } : l)), walkTime(live.at, at));
       }
     }, wait + (live.pose === "walk" ? 4000 : 8000));
     return () => clearTimeout(t);
@@ -107,21 +127,34 @@ export function GardenScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoplay, ctx, live, holdUntil]);
 
+  /** Act out a reaction where the pet is now: its clip from the first frame, with its sound. */
+  const perform = (r: Reaction, at: Spot) => {
+    const seed = nextSeed();
+    setLive({ at, pose: r.pose, caption: r.caption, clips: r.clips, stayed: stayed(r.at), seed });
+    setRestartKey((n) => n + 1);
+    // Floating hearts suit the storybook pet; the real one just shows how it feels.
+    if (r.hearts && !real) setHeartsKey((k) => (k ?? 0) + 1);
+    if (!state.soundOn) return;
+    // A bark clip brings its own bark; otherwise their recordings, then whatever the footage sounds like.
+    const shown = pickVideoClip(state.clips, r.clips, seed);
+    const recording = pickSound(state.sounds, r.sounds, nextSeed());
+    const uri = shown?.action === "bark" && shown.audioUri ? shown.audioUri : (recording?.uri ?? shown?.audioUri);
+    if (uri) play(uri);
+  };
+
   const respond = useCallback(
     (i: Interaction, treat?: string) => {
       const r = react(i, { name: pet.name, species: pet.species, here: live.at, toy, treat });
-      const seed = nextSeed();
-      setLive({ at: r.at, pose: r.pose, caption: r.caption, clips: r.clips, seed });
-      setHoldUntil(Date.now() + r.seconds * 1000);
-      if (r.hearts) setHeartsKey((k) => (k ?? 0) + 1);
-      if (!state.soundOn) return;
-      // A bark clip brings its own bark; otherwise their recordings, then whatever the footage sounds like.
-      const shown = pickVideoClip(state.clips, r.clips, seed);
-      const recording = pickSound(state.sounds, r.sounds, nextSeed());
-      const uri = shown?.action === "bark" && shown.audioUri ? shown.audioUri : (recording?.uri ?? shown?.audioUri);
-      if (uri) play(uri);
+      const at = place(r.at);
+      clearTimeout(settle.current);
+      // The real pet walks over first, then reacts; the storybook pet does both at once.
+      const walk = real && Math.hypot(at.x - live.at.x, at.depth - live.at.depth) > 0.03 ? walkTime(live.at, at) : 0;
+      setHoldUntil(Date.now() + walk + r.seconds * 1000);
+      if (!walk) return perform(r, at);
+      setLive({ at, pose: "walk", caption: r.caption, seed: nextSeed() });
+      settle.current = setTimeout(() => perform(r, at), walk);
     },
-    // nextSeed only touches a ref
+    // nextSeed only touches a ref; place, walkTime and perform only read what's listed
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips],
   );
@@ -148,6 +181,7 @@ export function GardenScreen({
         at={live.at}
         pose={live.pose}
         clip={clip}
+        restartKey={restartKey}
         night={night}
         photos={state.photos}
         heartsKey={heartsKey}
@@ -155,7 +189,7 @@ export function GardenScreen({
         onPhotoPress={setViewing}
       />
       <Text style={{ color: colors.ink, fontSize: 15, marginTop: 8, minHeight: 40 }} accessibilityLiveRegion="polite">
-        {live.caption}
+        {caption}
       </Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>
         ✦ A simulation of {pet.name}

@@ -42,6 +42,7 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
   const [viewing, setViewing] = useState<PetPhoto>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [cutting, setCutting] = useState<number>(); // progress of the clip being cut out, 0…1
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -92,7 +93,7 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
 
   const addVideo = () =>
     run(async () => {
-      const c = await importVideoClip();
+      const c = await importVideoClip(setCutting).finally(() => setCutting(undefined));
       if (!c) return;
       update((st) => ({ ...st, clips: [...st.clips, { ...c, id: newId(), action: st.clips.length ? "walk" : "sit" }] }));
       setMessage(
@@ -135,14 +136,21 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
         {state.clips.map((c) => (
           <View key={c.id} style={{ paddingVertical: 8, borderBottomWidth: 0.5, borderColor: "#eee" }}>
             <View style={[s.row, { alignItems: "center" }]}>
-              <View style={{ width: 96, height: 96, borderRadius: 10, backgroundColor: "#eef6e6" }}>
-                <ClipPlayer clip={c} size={96} />
+              <View style={{ width: 96, height: 96, borderRadius: 10, backgroundColor: "#dcebd0", overflow: "hidden" }}>
+                <ClipPlayer clip={c} height={Math.min(96, (96 * c.height) / c.width)} />
               </View>
               {c.audioUri && (
                 <Text style={{ color: colors.accent }} onPress={() => play(c.audioUri!)}>
                   ▶︎ Sound
                 </Text>
               )}
+              <Text
+                style={{ color: colors.accent }}
+                accessibilityHint="Which way they face in this clip, so they walk forwards in the garden"
+                onPress={() => update((st) => ({ ...st, clips: st.clips.map((x) => (x.id === c.id ? { ...x, facing: x.facing === "left" ? "right" : "left" } : x)) }))}
+              >
+                {c.facing === "left" ? "← Facing left" : "Facing right →"}
+              </Text>
               <Text
                 style={{ color: colors.danger }}
                 onPress={() => {
@@ -165,6 +173,7 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
             </View>
           </View>
         ))}
+        {cutting !== undefined && <Note>{`Bringing ${pet.name} out of the video… ${Math.round(cutting * 100)}%`}</Note>}
         <Button label={busy ? "Working…" : "Add a video"} onPress={addVideo} disabled={busy} />
       </Card>
 

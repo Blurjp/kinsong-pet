@@ -16,7 +16,7 @@ import { PetCutout } from "../modules/pet-cutout";
 
 const isWeb = Platform.OS === "web";
 const MAX_WEB_AUDIO_BYTES = 1_500_000;
-/** 8 s at 12 fps is the most frames the cut-out keeps. */
+/** Longest clip the cut-out keeps, at the video's own frame rate (up to 30 fps). */
 const CLIP_SECONDS = 8;
 
 function mediaDir(): Directory {
@@ -80,20 +80,23 @@ export function forget(uri: string): void {
  * Let the owner choose a short video of their pet (trimmed in the picker), and
  * cut the pet out of it on the phone. The garden then shows these real frames.
  */
-export async function importVideoClip(): Promise<Omit<VideoClip, "id" | "action"> | undefined> {
+export async function importVideoClip(onProgress?: (fraction: number) => void): Promise<Omit<VideoClip, "id" | "action"> | undefined> {
   if (!PetCutout) throw new Error("Video clips need the installed app. They don't work in the web preview or Expo Go.");
   const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsEditing: true, videoMaxDuration: CLIP_SECONDS });
   const a = r.canceled ? undefined : r.assets[0];
   if (!a) return undefined;
   const dir = new Directory(mediaDir(), `clip-${Date.now()}`);
   dir.create();
+  const sub = onProgress ? PetCutout.addListener("onProgress", (e) => onProgress(e.progress)) : undefined;
   try {
-    const out = await PetCutout.cutOut(a.uri, dir.uri, { fps: 12, maxSeconds: CLIP_SECONDS, frameSize: 240 });
+    const out = await PetCutout.cutOut(a.uri, dir.uri, { maxSeconds: CLIP_SECONDS, maxFps: 30, size: 720 });
     // A trailing slash marks it as a folder for forget().
     return { dir: dir.uri.endsWith("/") ? dir.uri : `${dir.uri}/`, ...out };
   } catch (e) {
     dir.delete();
     throw e;
+  } finally {
+    sub?.remove();
   }
 }
 

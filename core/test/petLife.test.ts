@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   LANDMARKS,
+  CLIP_ACTIONS,
   activityWeights,
+  canTravel,
+  clipCaption,
   clipActionsFor,
   coatColorsFromImage,
   isNight,
@@ -108,17 +111,18 @@ describe("pickSound", () => {
 });
 
 describe("pickVideoClip", () => {
-  const clip = (id: string, action: VideoClip["action"]): VideoClip => ({
+  const clip = (id: string, action: VideoClip["action"], closeUp = false): VideoClip => ({
     id,
     action,
     dir: `file:///clips/${id}/`,
-    sheetUri: `file:///clips/${id}/sheet.png`,
-    frameCount: 24,
-    cols: 5,
-    fps: 12,
-    width: 200,
-    height: 180,
+    videoUri: `file:///clips/${id}/clip.mov`,
+    posterUri: `file:///clips/${id}/poster.png`,
+    width: 600,
+    height: 540,
+    seconds: 6,
     cutout: true,
+    closeUp,
+    facing: "right",
   });
   const clips = [clip("s", "sit"), clip("w", "walk"), clip("b1", "bark"), clip("b2", "bark")];
 
@@ -132,6 +136,19 @@ describe("pickVideoClip", () => {
     expect(pickVideoClip(clips, clipActionsFor("walk"), 1)?.id).toBe("w");
     expect(pickVideoClip(clips, clipActionsFor("sleep"), 1)?.id).toBe("s");
     expect(pickVideoClip([clip("w", "walk")], clipActionsFor("eat"), 1)?.id).toBe("w");
+    for (let seed = 0; seed < 20; seed++) expect(pickVideoClip([clip("w", "walk"), clip("b", "bark")], clipActionsFor("sleep"), seed)?.id).toBe("b");
+  });
+
+  it("only travels when there's footage of it walking on its own feet", () => {
+    expect(canTravel(clips)).toBe(true);
+    expect(canTravel([clip("s", "sit"), clip("b", "bark")])).toBe(false);
+    expect(canTravel([clip("w", "walk", true)])).toBe(false);
+  });
+
+  it("describes what the footage shows, and is never sad", () => {
+    expect(clipCaption("Max", "bark", true)).toBe("Max barks hello!");
+    expect(clipCaption("Max", "sit", true)).toBe("Max sits with you under the stars.");
+    for (const a of CLIP_ACTIONS) for (const night of [true, false]) expect(clipCaption("Max", a, night)).not.toMatch(/hungry|lonely|sad|miss|waiting|alone/i);
   });
 
   it("is reproducible for a seed, and empty without footage", () => {

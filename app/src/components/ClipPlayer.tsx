@@ -1,52 +1,74 @@
 import { useEffect, useState } from "react";
-import { Image, View } from "react-native";
+import { Animated, Easing, Image, StyleSheet, View } from "react-native";
 import type { VideoClip } from "@sinian/core";
+import { PetClipView } from "../../modules/pet-cutout";
 
 /**
- * Plays one of the family's video clips from its sprite sheet, looping. The
- * frame is fitted into a `size` box with the pet's feet on the bottom edge,
- * like the storybook sprite, so it stands on the meadow the same way.
+ * One of the family's video clips, playing on a loop at its own frame rate,
+ * with the garden showing through around the pet. Fills its parent and stands
+ * the pet on the parent's bottom edge, centred, `height` px tall. When the
+ * clip changes (sitting → barking) the two crossfade instead of cutting, the
+ * way footage of one animal would. Where native video isn't available (tests,
+ * web) the clip's first frame stands in.
  */
-export function ClipPlayer({ clip, size, flip = false, playing = true }: { clip: VideoClip; size: number; flip?: boolean; playing?: boolean }) {
-  const [tick, setTick] = useState(0);
+export function ClipPlayer({
+  clip,
+  height,
+  flip = false,
+  night = false,
+  restartKey,
+}: {
+  clip: VideoClip;
+  height: number;
+  flip?: boolean;
+  /** Light it like the night-time garden. */
+  night?: boolean;
+  restartKey?: number;
+}) {
+  const [shown, setShown] = useState(clip);
+  const [leaving, setLeaving] = useState<VideoClip>();
+  const [fade] = useState(() => new Animated.Value(1));
+  if (clip.id !== shown.id) {
+    setLeaving(shown);
+    setShown(clip);
+  }
 
   useEffect(() => {
-    if (!playing || clip.frameCount < 2) return;
-    const t = setInterval(() => setTick((n) => n + 1), 1000 / clip.fps);
-    return () => clearInterval(t);
-  }, [clip, playing]);
-
-  const frame = tick % clip.frameCount;
-  const fit = size / Math.max(clip.width, clip.height);
-  const w = clip.width * fit;
-  const h = clip.height * fit;
-  const rows = Math.ceil(clip.frameCount / clip.cols);
-  const col = frame % clip.cols;
-  const row = Math.floor(frame / clip.cols);
+    fade.setValue(0);
+    const anim = Animated.timing(fade, { toValue: 1, duration: 320, easing: Easing.inOut(Easing.quad), useNativeDriver: true });
+    anim.start(({ finished }) => finished && setLeaving(undefined));
+    return () => anim.stop();
+  }, [shown.id, fade]);
 
   return (
-    <View style={[{ width: size, height: size }, flip && { transform: [{ scaleX: -1 }] }]} pointerEvents="none">
-      {clip.cutout && (
-        <View style={{ position: "absolute", left: (size - w * 0.8) / 2, top: size - 8, width: w * 0.8, height: 10, borderRadius: 999, backgroundColor: "#000", opacity: 0.12 }} />
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {leaving && (
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>
+          <Layer clip={leaving} height={height} flip={flip} night={night} />
+        </Animated.View>
       )}
-      <View
-        style={{
-          position: "absolute",
-          left: (size - w) / 2,
-          top: size - h,
-          width: w,
-          height: h,
-          overflow: "hidden",
-          // Footage that couldn't be cut out sits in a soft frame instead.
-          ...(clip.cutout ? null : { borderRadius: w * 0.18, borderWidth: 2, borderColor: "#fffdf8" }),
-        }}
-      >
-        <Image
-          source={{ uri: clip.sheetUri }}
-          fadeDuration={0}
-          style={{ position: "absolute", left: -col * w, top: -row * h, width: w * clip.cols, height: h * rows }}
-        />
-      </View>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: leaving ? fade : 1 }]}>
+        <Layer clip={shown} height={height} flip={flip} night={night} restartKey={restartKey} />
+      </Animated.View>
     </View>
+  );
+}
+
+function Layer({ clip, height, flip, night, restartKey }: { clip: VideoClip; height: number; flip: boolean; night: boolean; restartKey?: number }) {
+  const width = (height * clip.width) / clip.height;
+  const box = {
+    position: "absolute" as const,
+    left: "50%" as const,
+    bottom: 0,
+    width,
+    height,
+    marginLeft: -width / 2,
+    // Footage that couldn't be cut out sits in a soft frame instead.
+    ...(clip.cutout ? null : { borderRadius: Math.min(width, height) * 0.12, overflow: "hidden" as const, borderWidth: 2, borderColor: "#fffdf8" }),
+  };
+  return PetClipView ? (
+    <PetClipView uri={clip.videoUri} flip={flip} night={night} restartKey={restartKey} style={box} />
+  ) : (
+    <Image source={{ uri: clip.posterUri }} style={[box, flip && { transform: [{ scaleX: -1 }] }]} accessibilityIgnoresInvertColors />
   );
 }

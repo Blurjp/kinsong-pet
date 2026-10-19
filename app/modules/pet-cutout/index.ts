@@ -1,28 +1,47 @@
-import { requireOptionalNativeModule } from "expo-modules-core";
+import type { ComponentType } from "react";
+import type { ViewProps } from "react-native";
+import { requireNativeViewManager, requireOptionalNativeModule, type EventSubscription } from "expo-modules-core";
 
 /** What `cutOut` wrote into the output folder. */
 export interface CutOutResult {
-  sheetUri: string;
-  frameCount: number;
-  cols: number;
-  fps: number;
+  /** HEVC with alpha when `cutout`, so the garden shows through around the pet. */
+  videoUri: string;
+  /** The first frame, for places that don't play video. */
+  posterUri: string;
   width: number;
   height: number;
-  /** False when no subject could be separated, so frames keep their background. */
+  seconds: number;
+  /** False when no pet could be separated from the background, so the footage keeps it. */
   cutout: boolean;
+  /** The pet runs off the bottom of the frame. */
+  closeUp: boolean;
+  facing: "left" | "right";
   audioUri?: string;
 }
 
 export interface CutOutOptions {
-  fps?: number;
   maxSeconds?: number;
-  /** Longest side of one frame in the sheet, in pixels. */
-  frameSize?: number;
+  maxFps?: number;
+  /** Longest side of the output, in pixels. */
+  size?: number;
 }
 
 interface PetCutoutNative {
   cutOut(videoUri: string, outDir: string, options: CutOutOptions): Promise<CutOutResult>;
+  addListener(event: "onProgress", listener: (e: { progress: number }) => void): EventSubscription;
+}
+
+export interface PetClipViewProps extends ViewProps {
+  uri: string;
+  flip?: boolean;
+  /** Changing it plays the clip from the start. */
+  restartKey?: number;
+  /** Light it like the night-time garden. */
+  night?: boolean;
 }
 
 /** Undefined on web and in Expo Go, where the native module isn't built in. */
 export const PetCutout = requireOptionalNativeModule<PetCutoutNative>("PetCutout") ?? undefined;
+
+/** The see-through, looping clip view; undefined wherever PetCutout is. */
+export const PetClipView: ComponentType<PetClipViewProps> | undefined = PetCutout ? requireNativeViewManager<PetClipViewProps>("PetCutout") : undefined;

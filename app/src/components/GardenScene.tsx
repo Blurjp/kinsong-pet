@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import Svg, {
   Circle,
   ClipPath,
@@ -24,6 +24,15 @@ const H = 300;
 const RAINBOW = ["#f4a4a4", "#f7c58b", "#f6e08f", "#a9dba0", "#9cc9ee", "#b9a6e3"];
 const STARS = Array.from({ length: 34 }, (_, i) => ({ x: (i * 97) % W, y: (i * 53) % 150, r: i % 3 ? 0.9 : 1.6 }));
 
+/**
+ * How long the real pet takes to walk between two spots: a steady, unhurried
+ * walk of about 60 scene units a second, never an eased glide. The garden
+ * screen waits this long before it lets the pet settle into what it's doing.
+ */
+export function walkMs(from: Spot, to: Spot): number {
+  return (Math.hypot((to.x - from.x) * W, (to.depth - from.depth) * 72) / 60) * 1000;
+}
+
 /** Feet position in scene units for a meadow spot. */
 export function footOf(at: Spot): { x: number; y: number } {
   return { x: at.x * W, y: 205 + at.depth * 72 };
@@ -36,6 +45,8 @@ export interface SceneProps {
   pose: Pose;
   /** A clip from the family's own video to show instead of the storybook pet. */
   clip?: VideoClip;
+  /** Changing it plays the clip from its start, in step with its sound. */
+  restartKey?: number;
   night: boolean;
   photos: readonly PetPhoto[];
   /** Changes each time hearts should float up. */
@@ -45,7 +56,7 @@ export interface SceneProps {
 }
 
 /** The meadow by the Rainbow Bridge, with the pet living in it. */
-export function GardenScene({ pet, garden, at, pose, clip, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
+export function GardenScene({ pet, garden, at, pose, clip, restartKey, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
   const [k, setK] = useState(0); // px per scene unit, known after layout
 
   return (
@@ -133,7 +144,12 @@ export function GardenScene({ pet, garden, at, pose, clip, night, photos, hearts
         ))}
       </Svg>
 
-      {k > 0 && <LivingPet pet={pet} at={at} pose={pose} clip={clip} k={k} heartsKey={heartsKey} onPress={onPetPress} />}
+      {k > 0 &&
+        (clip ? (
+          <RealPet name={pet.name} clip={clip} at={at} k={k} night={night} restartKey={restartKey} onPress={onPetPress} />
+        ) : (
+          <LivingPet pet={pet} at={at} pose={pose} k={k} heartsKey={heartsKey} onPress={onPetPress} />
+        ))}
 
       {/* near flowers stand in front of the pet */}
       <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }} pointerEvents="none">
@@ -156,26 +172,9 @@ function polaroid(i: number) {
 /**
  * The pet in its own animated layer. Movement is a straight walk between
  * spots; it faces the way it is going, bobs while walking, breathes while
- * resting, and grows slightly as it comes nearer. With a video clip, the
- * footage supplies its own movement, so it doesn't bob.
+ * resting, and grows slightly as it comes nearer.
  */
-function LivingPet({
-  pet,
-  at,
-  pose,
-  clip,
-  k,
-  heartsKey,
-  onPress,
-}: {
-  pet: PetProfile;
-  at: Spot;
-  pose: Pose;
-  clip?: VideoClip;
-  k: number;
-  heartsKey?: number;
-  onPress?: () => void;
-}) {
+function LivingPet({ pet, at, pose, k, heartsKey, onPress }: { pet: PetProfile; at: Spot; pose: Pose; k: number; heartsKey?: number; onPress?: () => void }) {
   const [ax] = useState(() => new Animated.Value(at.x));
   const [ad] = useState(() => new Animated.Value(at.depth));
   const [bob] = useState(() => new Animated.Value(0));
@@ -229,10 +228,9 @@ function LivingPet({
   return (
     <Animated.View style={{ position: "absolute", left: 0, top: 0, width: box, height: box, transform: [{ translateX }, { translateY }, { scale }] }}>
       <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Pet ${pet.name}`} style={{ flex: 1 }}>
-        <Animated.View style={{ flex: 1, transform: [{ translateY: pose === "sleep" || clip ? 0 : lift }] }}>
-          {clip && <ClipPlayer clip={clip} size={box} flip={flip} />}
-          <Svg width="100%" height="100%" viewBox="0 0 100 100" style={clip ? { position: "absolute", left: 0, top: 0 } : undefined}>
-            {!clip && <PetSprite species={pet.species} coat={pet.coat} accent={pet.accent} x={50} y={50} size={100} pose={pose} flip={flip} />}
+        <Animated.View style={{ flex: 1, transform: [{ translateY: pose === "sleep" ? 0 : lift }] }}>
+          <Svg width="100%" height="100%" viewBox="0 0 100 100">
+            <PetSprite species={pet.species} coat={pet.coat} accent={pet.accent} x={50} y={50} size={100} pose={pose} flip={flip} />
             {pose === "sleep" && (
               <G>
                 <SvgText x={62} y={52} fontSize={11} fill="#fff" opacity={0.9}>z</SvgText>
@@ -260,6 +258,94 @@ function LivingPet({
     </Animated.View>
   );
 }
+
+/**
+ * The real pet, from the family's own footage. It stands on the meadow with a
+ * soft contact shadow, gets smaller as it goes further away, and only changes
+ * place at walking pace (the garden screen only moves it when there's footage
+ * of it walking). A close-up, where the pet runs off the bottom of the
+ * picture, is shown large and near, rising from the bottom of the scene as if
+ * it were right in front of you.
+ */
+function RealPet({
+  name,
+  clip,
+  at,
+  k,
+  night,
+  restartKey,
+  onPress,
+}: {
+  name: string;
+  clip: VideoClip;
+  at: Spot;
+  k: number;
+  night: boolean;
+  restartKey?: number;
+  onPress?: () => void;
+}) {
+  const [ax] = useState(() => new Animated.Value(at.x));
+  const [ad] = useState(() => new Animated.Value(at.depth));
+  const [heading, setHeading] = useState<"left" | "right">(clip.facing);
+  const last = useRef(at);
+
+  useEffect(() => {
+    const from = last.current;
+    last.current = at;
+    if (Math.hypot(at.x - from.x, at.depth - from.depth) < 0.005) return;
+    if (Math.abs(at.x - from.x) > 0.01) setHeading(at.x < from.x ? "left" : "right");
+    const duration = walkMs(from, at);
+    const anim = Animated.parallel([
+      Animated.timing(ax, { toValue: at.x, duration, easing: Easing.linear, useNativeDriver: true }),
+      Animated.timing(ad, { toValue: at.depth, duration, easing: Easing.linear, useNativeDriver: true }),
+    ]);
+    anim.start();
+    return () => anim.stop();
+  }, [at, ax, ad]);
+
+  const flip = heading !== clip.facing;
+  const label = `Pet ${name}`;
+
+  if (clip.closeUp) {
+    const h = H * 0.7 * k;
+    return (
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: h }}>
+        <ClipPlayer clip={clip} height={h} flip={flip} night={night} restartKey={restartKey} />
+      </Pressable>
+    );
+  }
+
+  // Sized for the nearest spot, then scaled down with distance. Scaling happens about the box's
+  // centre, so the box is moved down by what the scaling takes off the bottom: the feet stay put.
+  const h = NEAR_PET_HEIGHT * k;
+  const w = Math.min((h * clip.width) / clip.height, 190 * k);
+  const scale = ad.interpolate({ inputRange: [0, 1], outputRange: [FAR_PET_HEIGHT / NEAR_PET_HEIGHT, 1] });
+  const translateX = ax.interpolate({ inputRange: [0, 1], outputRange: [-w / 2, W * k - w / 2] });
+  const feetY = ad.interpolate({ inputRange: [0, 1], outputRange: [205 * k - h / 2, 277 * k - h / 2] });
+  const translateY = Animated.add(feetY, Animated.multiply(scale, -h / 2));
+
+  return (
+    <Animated.View style={{ position: "absolute", left: 0, top: 0, width: w, height: h, transform: [{ translateX }, { translateY }, { scale }] }}>
+      <Svg width={w} height={h * 0.12} style={{ position: "absolute", left: 0, bottom: -h * 0.045 }}>
+        <Defs>
+          <RadialGradient id="contact" cx="0.5" cy="0.5" r="0.5">
+            <Stop offset="0" stopColor="#1d2a14" stopOpacity={0.32} />
+            <Stop offset="0.6" stopColor="#1d2a14" stopOpacity={0.12} />
+            <Stop offset="1" stopColor="#1d2a14" stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Ellipse cx={w / 2} cy={h * 0.06} rx={w * 0.42} ry={h * 0.05} fill="url(#contact)" />
+      </Svg>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={StyleSheet.absoluteFill}>
+        <ClipPlayer clip={clip} height={h} flip={flip} night={night} restartKey={restartKey} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** The real pet's height in scene units at the nearest and furthest spots (the scene is 300 tall). */
+const NEAR_PET_HEIGHT = 118;
+const FAR_PET_HEIGHT = 62;
 
 function Heart({ x, y, s }: { x: number; y: number; s: number }) {
   return <Path transform={`translate(${x} ${y}) scale(${s})`} d="M0 3 C-6 -3 -10 4 0 10 C10 4 6 -3 0 3 Z" fill="#f2788a" />;

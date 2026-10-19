@@ -43,25 +43,38 @@ export const CLIP_ACTIONS: readonly ClipAction[] = ["sit", "walk", "play", "bark
 
 /**
  * A short clip from the family's own video, cut out of its background on the
- * phone. The frames are the real footage, packed into one sprite sheet; the
- * sound is the clip's own audio, untouched. Nothing is generated.
+ * phone. The picture is the real footage at its own frame rate, with the
+ * background made transparent; the sound is the clip's own audio, untouched.
+ * Nothing is generated.
  */
 export interface VideoClip {
   id: string;
   action: ClipAction;
-  /** Folder holding the sheet and audio, so the clip can be forgotten in one go. */
+  /** Folder holding the video, poster and audio, so the clip can be forgotten in one go. */
   dir: string;
-  /** Frames laid out left→right, top→bottom, `cols` per row. */
-  sheetUri: string;
-  frameCount: number;
-  cols: number;
-  fps: number;
-  /** One frame's size in pixels. The pet's feet touch the bottom edge. */
+  videoUri: string;
+  /** The first frame, for places that don't play video. */
+  posterUri: string;
+  /** Frame size in pixels. Unless it's a close-up, the pet's feet touch the bottom edge. */
   width: number;
   height: number;
-  /** False when the pet couldn't be separated from the background, so frames keep it. */
+  seconds: number;
+  /** False when the pet couldn't be separated from the background, so the footage keeps it. */
   cutout: boolean;
+  /** The pet runs off the bottom of the picture, so it's shown near, from the bottom of the scene. */
+  closeUp: boolean;
+  /** Which way the pet travels in the footage, to face it the right way in the garden. */
+  facing: "left" | "right";
   audioUri?: string;
+}
+
+/**
+ * How the real pet moves in the garden. A real animal can't glide, so it only
+ * travels when there's a walking clip to show it walking; otherwise it stays
+ * where it is and only what it's doing changes. Close-ups never travel.
+ */
+export function canTravel(clips: readonly VideoClip[]): boolean {
+  return clips.some((c) => c.action === "walk" && !c.closeUp);
 }
 
 /** A point in the meadow: x 0..1 left→right, depth 0 (far) → 1 (near). */
@@ -304,19 +317,42 @@ export function clipActionsFor(pose: Pose): ClipAction[] {
   return POSE_CLIPS[pose];
 }
 
+const CLIP_CAPTION: Record<ClipAction, { day: string; night?: string }> = {
+  sit: { day: "{name} sits in the warm sun, watching you.", night: "{name} sits with you under the stars." },
+  walk: { day: "{name} trots across the meadow." },
+  play: { day: "{name} is in a playful mood." },
+  bark: { day: "{name} barks hello!" },
+  sleep: { day: "{name} is fast asleep in the grass.", night: "{name} is fast asleep under the stars." },
+  eat: { day: "{name} is munching away happily." },
+};
+
+/**
+ * What the family can see the real pet doing. When there's no footage of what
+ * the pet "would" be doing (asleep, but no sleeping clip), the caption has to
+ * describe the clip that is showing, not the moment that was planned.
+ */
+export function clipCaption(name: string, action: ClipAction, night: boolean): string {
+  const c = CLIP_CAPTION[action];
+  return ((night && c.night) || c.day).replace("{name}", name);
+}
+
 /**
  * Choose one of the family's video clips: the first preferred action that has
  * clips, then a sitting clip (calm enough to stand in for anything), then any
- * clip at all, so the pet always looks like itself once there is footage.
+ * clip that isn't walking, so the pet always looks like itself once there is
+ * footage. A walking clip only stands in when there's nothing else, since
+ * walking on the spot is the one thing a real pet never does.
  */
 export function pickVideoClip(clips: readonly VideoClip[], prefer: readonly ClipAction[], seed: number): VideoClip | undefined {
   if (!clips.length) return undefined;
   const r = rng(seed);
+  const pick = (list: readonly VideoClip[]) => list[Math.floor(r() * list.length)];
   for (const action of [...prefer, "sit" as const]) {
     const matching = clips.filter((c) => c.action === action);
-    if (matching.length) return matching[Math.floor(r() * matching.length)];
+    if (matching.length) return pick(matching);
   }
-  return clips[Math.floor(r() * clips.length)];
+  const still = clips.filter((c) => c.action !== "walk");
+  return pick(still.length ? still : clips);
 }
 
 /**
