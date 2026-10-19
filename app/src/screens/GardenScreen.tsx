@@ -182,6 +182,7 @@ export function GardenScreen({
         pose={live.pose}
         clip={clip}
         restartKey={restartKey}
+        place={state.place}
         night={night}
         photos={state.photos}
         heartsKey={heartsKey}

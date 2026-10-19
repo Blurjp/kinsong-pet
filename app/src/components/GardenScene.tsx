@@ -17,7 +17,7 @@ import Svg, {
 import type { GardenState, PetPhoto, PetProfile, Pose, Spot, VideoClip } from "@sinian/core";
 import { PetSprite } from "./PetSprite";
 import { ClipPlayer } from "./ClipPlayer";
-import { DOG_METRES, PhotoBackdrop, PhotoFront, groundY, unitsPerMetre } from "./PhotoGarden";
+import { DOG_METRES, MEADOW, PhotoBackdrop, PhotoFront, groundY, unitsPerMetre, type Place } from "./PhotoGarden";
 import { Flower } from "./Flower";
 
 const W = 400;
@@ -48,6 +48,8 @@ export interface SceneProps {
   clip?: VideoClip;
   /** Changing it plays the clip from its start, in step with its sound. */
   restartKey?: number;
+  /** For the real pet: the photographed place it lives in (the meadow unless the family chose one). */
+  place?: Place;
   night: boolean;
   photos: readonly PetPhoto[];
   /** Changes each time hearts should float up. */
@@ -57,7 +59,7 @@ export interface SceneProps {
 }
 
 /** The meadow by the Rainbow Bridge, with the pet living in it. */
-export function GardenScene({ pet, garden, at, pose, clip, restartKey, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
+export function GardenScene({ pet, garden, at, pose, clip, restartKey, place = MEADOW, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
   const [k, setK] = useState(0); // px per scene unit, known after layout
   // The real pet lives in a real meadow; the storybook pet keeps its illustrated one.
   const photo = !!clip;
@@ -70,7 +72,7 @@ export function GardenScene({ pet, garden, at, pose, clip, restartKey, night, ph
     >
       <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
         {photo ? (
-          <PhotoBackdrop garden={garden} night={night} toy={pet.favorites.toys.length > 0} />
+          <PhotoBackdrop garden={garden} night={night} toy={pet.favorites.toys.length > 0} place={place} />
         ) : (
           <>
             <Defs>
@@ -155,7 +157,7 @@ export function GardenScene({ pet, garden, at, pose, clip, restartKey, night, ph
 
       {k > 0 &&
         (clip ? (
-          <RealPet name={pet.name} clip={clip} at={at} k={k} night={night} restartKey={restartKey} onPress={onPetPress} />
+          <RealPet name={pet.name} clip={clip} at={at} k={k} night={night} place={place} restartKey={restartKey} onPress={onPetPress} />
         ) : (
           <LivingPet pet={pet} at={at} pose={pose} k={k} heartsKey={heartsKey} onPress={onPetPress} />
         ))}
@@ -164,7 +166,7 @@ export function GardenScene({ pet, garden, at, pose, clip, restartKey, night, ph
       <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }} pointerEvents="none">
         <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
           {/* nothing stands between you and a close-up */}
-          {photo ? !clip?.closeUp && <PhotoFront garden={garden} night={night} /> : garden.flowers.filter((f) => f.depth >= NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
+          {photo ? !clip?.closeUp && <PhotoFront garden={garden} night={night} place={place} /> : garden.flowers.filter((f) => f.depth >= NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
         </Svg>
       </View>
     </View>
@@ -283,6 +285,7 @@ function RealPet({
   at,
   k,
   night,
+  place,
   restartKey,
   onPress,
 }: {
@@ -291,6 +294,7 @@ function RealPet({
   at: Spot;
   k: number;
   night: boolean;
+  place: Place;
   restartKey?: number;
   onPress?: () => void;
 }) {
@@ -327,11 +331,15 @@ function RealPet({
 
   // Sized for the nearest spot, then scaled down with distance. Scaling happens about the box's
   // centre, so the box is moved down by what the scaling takes off the bottom: the feet stay put.
-  const h = NEAR_PET_HEIGHT * k;
+  // A dog of average height, at its real size on this photo's ground. Height on the ground grows
+  // linearly with depth, so scaling between the nearest and furthest spots is exact.
+  const near = DOG_METRES * unitsPerMetre(groundY(1, place), place);
+  const far = DOG_METRES * unitsPerMetre(groundY(0, place), place);
+  const h = near * k;
   const w = Math.min((h * clip.width) / clip.height, 190 * k);
-  const scale = ad.interpolate({ inputRange: [0, 1], outputRange: [FAR_PET_HEIGHT / NEAR_PET_HEIGHT, 1] });
+  const scale = ad.interpolate({ inputRange: [0, 1], outputRange: [far / near, 1] });
   const translateX = ax.interpolate({ inputRange: [0, 1], outputRange: [-w / 2, W * k - w / 2] });
-  const feetY = ad.interpolate({ inputRange: [0, 1], outputRange: [205 * k - h / 2, 277 * k - h / 2] });
+  const feetY = ad.interpolate({ inputRange: [0, 1], outputRange: [groundY(0, place) * k - h / 2, groundY(1, place) * k - h / 2] });
   const translateY = Animated.add(feetY, Animated.multiply(scale, -h / 2));
 
   return (
@@ -353,13 +361,6 @@ function RealPet({
   );
 }
 
-/**
- * The real pet's height in scene units at the nearest and furthest spots: a
- * dog of average height at its real size in the meadow photograph. Height on
- * the ground grows linearly with depth there, so scaling between the two is exact.
- */
-const NEAR_PET_HEIGHT = DOG_METRES * unitsPerMetre(groundY(1));
-const FAR_PET_HEIGHT = DOG_METRES * unitsPerMetre(groundY(0));
 
 function Heart({ x, y, s }: { x: number; y: number; s: number }) {
   return <Path transform={`translate(${x} ${y}) scale(${s})`} d="M0 3 C-6 -3 -10 4 0 10 C10 4 6 -3 0 3 Z" fill="#f2788a" />;

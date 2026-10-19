@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { CLIP_ACTIONS, SOUND_TAGS, type ClipAction, type PetPhoto, type PetProfile, type SoundTag } from "@sinian/core";
 import { newId, today, useStore } from "../state/store";
-import { coatFromPhoto, forget, importVideoClip, pickPhotos, pickRecording, play } from "../media";
+import { coatFromPhoto, forget, importVideoClip, pickPhotos, pickPlacePhoto, pickRecording, play } from "../media";
+import { PlaceEditor } from "../components/PlaceEditor";
 import { ClipPlayer } from "../components/ClipPlayer";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, Card, Chip, Note, colors, s } from "../ui";
@@ -103,6 +104,20 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
       );
     });
 
+  const choosePlace = () =>
+    run(async () => {
+      const uri = await pickPlacePhoto();
+      if (!uri) return;
+      if (state.place) forget(state.place.uri);
+      update((st) => ({ ...st, place: { uri, horizon: 0.55 } }));
+      setMessage(`Drag the line to where the ground meets the distance, so ${pet.name} stands at the right size.`);
+    });
+
+  const meadowAgain = () => {
+    if (state.place) forget(state.place.uri);
+    update((st) => ({ ...st, place: undefined }));
+  };
+
   return (
     <View>
       <Text style={[s.h1, { marginBottom: 4 }]}>{`Memories of ${pet.name}`}</Text>
@@ -175,6 +190,25 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
         ))}
         {cutting !== undefined && <Note>{`Bringing ${pet.name} out of the video… ${Math.round(cutting * 100)}%`}</Note>}
         <Button label={busy ? "Working…" : "Add a video"} onPress={addVideo} disabled={busy} />
+      </Card>
+
+      <Card title="Their place">
+        <Note>
+          {state.place
+            ? `${pet.name} lives here now. Drag the line to where the ground meets the distance; ${pet.name} is shown near and far at the size they'll be.`
+            : `Instead of the meadow, ${pet.name} can live somewhere they loved: your garden, the park, their spot by the window. Choose a photo taken at about their eye level, with open ground.`}
+        </Note>
+        {state.place && (
+          <PlaceEditor
+            place={state.place}
+            clip={state.clips.find((c) => !c.closeUp)}
+            onChange={(horizon) => update((st) => (st.place ? { ...st, place: { ...st.place, horizon } } : st))}
+          />
+        )}
+        <View style={[s.row, { marginTop: 10 }]}>
+          <Button label={busy ? "Working…" : state.place ? "Choose another photo" : "Choose a photo"} onPress={choosePlace} disabled={busy} />
+          {state.place && <Button label="Back to the meadow" kind="soft" onPress={meadowAgain} />}
+        </View>
       </Card>
 
       <Card title={`${pet.name}'s voice`}>

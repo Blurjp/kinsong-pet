@@ -9,9 +9,26 @@
     "ios": {
       "bundleIdentifier": "app.kinsong.pets",
       "supportsTablet": false,
-      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.app.kinsong.pets"
+        ]
+      }
     },
-    "android": { "package": "app.kinsong.pets" },
-    "web": { "bundler": "metro", "output": "single" }
+    "android": {
+      "package": "app.kinsong.pets"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "@bacons/apple-targets",
+      "expo-asset",
+      "./plugins/withoutPush"
+    ]
   }
 }

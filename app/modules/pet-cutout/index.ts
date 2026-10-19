@@ -19,6 +19,11 @@ export interface CutOutResult {
   audioUri?: string;
 }
 
+export interface WidgetInfo {
+  name: string;
+  days: { date: string; title: string }[];
+}
+
 export interface CutOutOptions {
   maxSeconds?: number;
   maxFps?: number;
@@ -29,6 +34,8 @@ export interface CutOutOptions {
 interface PetCutoutNative {
   cutOut(videoUri: string, outDir: string, options: CutOutOptions): Promise<CutOutResult>;
   addListener(event: "onProgress", listener: (e: { progress: number }) => void): EventSubscription;
+  /** Share the widget's picture (pet cut-out on its place) and remembrance days with the home-screen widget. */
+  updateWidget(info: WidgetInfo, background: string | null, pet: string | null, closeUp: boolean): Promise<void>;
 }
 
 export interface PetClipViewProps extends ViewProps {

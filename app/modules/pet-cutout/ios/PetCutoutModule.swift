@@ -1,6 +1,9 @@
 import AVFoundation
 import CoreImage
 import ExpoModulesCore
+import ImageIO
+import UniformTypeIdentifiers
+import WidgetKit
 
 /**
  Cuts the pet out of a short video on the device (see ClipCutter), and plays
@@ -22,6 +25,11 @@ public class PetCutoutModule: Module {
       } catch let e as ClipCutterError {
         throw CutOutException(e.description)
       }
+    }
+
+    // The home-screen widget's picture and days, written where the widget can read them.
+    AsyncFunction("updateWidget") { (info: [String: Any], background: URL?, pet: URL?, closeUp: Bool) throws in
+      try WidgetShare.write(info: info, background: background, pet: pet, closeUp: closeUp)
     }
 
     View(PetClipView.self) {
@@ -131,5 +139,70 @@ final class PetClipView: ExpoView {
     guard let key, restartKey != nil, key != restartKey else { return }
     player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
     player.play()
+  }
+}
+
+/** Shares the pet's picture (cut-out on its background) and remembrance days with the widget. */
+enum WidgetShare {
+  static let appGroup = "group.app.kinsong.pets"
+
+  static func write(info: [String: Any], background: URL?, pet: URL?, closeUp: Bool) throws {
+    guard let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
+      throw CutOutException("The widget's shared folder isn't available.")
+    }
+    let picture = dir.appendingPathComponent("widget.png")
+    try? FileManager.default.removeItem(at: picture)
+    if let background, let image = compose(background: background, pet: pet, closeUp: closeUp) {
+      try writePNG(image, to: picture)
+    }
+    let json = try JSONSerialization.data(withJSONObject: info)
+    try json.write(to: dir.appendingPathComponent("widget.json"), options: .atomic)
+    WidgetCenter.shared.reloadAllTimelines()
+  }
+
+  /** The place, filled to 2:1 (it's cropped to a square for the small widget), with the pet standing in front. */
+  private static func compose(background: URL, pet: URL?, closeUp: Bool) -> CGImage? {
+    let w = 1000, h = 500
+    guard let bg = load(background),
+          let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    ctx.interpolationQuality = .high
+    let fill = max(CGFloat(w) / CGFloat(bg.width), CGFloat(h) / CGFloat(bg.height))
+    let bw = CGFloat(bg.width) * fill, bh = CGFloat(bg.height) * fill
+    ctx.draw(bg, in: CGRect(x: (CGFloat(w) - bw) / 2, y: (CGFloat(h) - bh) / 2, width: bw, height: bh))
+    if let pet, let p = load(pet) {
+      // A close-up rises from the bottom edge; a whole pet stands a little way into the picture.
+      let ph = CGFloat(h) * (closeUp ? 0.9 : 0.62)
+      let pw = ph * CGFloat(p.width) / CGFloat(p.height)
+      let bottom = closeUp ? 0 : CGFloat(h) * 0.1
+      if !closeUp {
+        // A soft contact shadow, so it stands on the ground rather than floating over it.
+        let shadow = CGRect(x: (CGFloat(w) - pw * 0.8) / 2, y: bottom - ph * 0.03, width: pw * 0.8, height: ph * 0.1)
+        let colours = [CGColor(red: 0.11, green: 0.16, blue: 0.08, alpha: 0.45), CGColor(red: 0.11, green: 0.16, blue: 0.08, alpha: 0)] as CFArray
+        if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!, colors: colours, locations: [0, 1]) {
+          ctx.saveGState()
+          ctx.translateBy(x: shadow.midX, y: shadow.midY)
+          ctx.scaleBy(x: shadow.width / 2, y: shadow.height / 2)
+          ctx.drawRadialGradient(gradient, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: 1, options: [])
+          ctx.restoreGState()
+        }
+      }
+      ctx.draw(p, in: CGRect(x: (CGFloat(w) - pw) / 2, y: bottom, width: pw, height: ph))
+    }
+    return ctx.makeImage()
+  }
+
+  private static func load(_ url: URL) -> CGImage? {
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(src, 0, nil)
+  }
+
+  private static func writePNG(_ image: CGImage, to url: URL) throws {
+    guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+      throw CutOutException("Couldn't save the widget's picture.")
+    }
+    CGImageDestinationAddImage(dest, image, nil)
+    guard CGImageDestinationFinalize(dest) else { throw CutOutException("Couldn't save the widget's picture.") }
   }
 }

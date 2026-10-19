@@ -29,20 +29,38 @@ import { LANDMARKS } from "@sinian/core";
 const W = 400;
 const H = 300;
 /** Where the meadow meets the trees in the photo: the eye-level horizon. */
-export const HORIZON = (640 / 1080) * H;
+const MEADOW_HORIZON = (640 / 1080) * H;
 /** The treeline cut-out (sky made transparent), so the rainbow and stars can sit behind the trees. */
 const TREELINE = { y: (368 / 1080) * H, h: ((670 - 368) / 1080) * H };
 /** Camera height in metres. Things on the ground are this many metres tall at the horizon line… */
 const CAMERA_M = 0.75;
 
-/** Scene units per metre for something standing at scene height y. */
-export function unitsPerMetre(y: number): number {
-  return Math.max(0, y - HORIZON) / CAMERA_M;
+/**
+ * A photographed place: the stock meadow, or a photo of somewhere the pet
+ * loved. `horizon` is where the ground meets the far distance (0 top → 1
+ * bottom), which sets the perspective for everything standing on it.
+ */
+export interface Place {
+  /** The family's own photo; absent for the meadow. */
+  uri?: string;
+  horizon: number;
 }
 
-/** Scene height of the ground at a meadow depth (0 far → 1 near), matching footOf(). */
-export function groundY(depth: number): number {
-  return 205 + depth * 72;
+export const MEADOW: Place = { horizon: MEADOW_HORIZON / H };
+
+// The pet's spots run from this far (0) to this near (1), as fractions of the ground below the horizon.
+const FAR = (205 - MEADOW_HORIZON) / (H - MEADOW_HORIZON);
+const NEAR_GROUND = (277 - MEADOW_HORIZON) / (H - MEADOW_HORIZON);
+
+/** Scene units per metre for something standing at scene height y. */
+export function unitsPerMetre(y: number, place: Place = MEADOW): number {
+  return Math.max(0, y - place.horizon * H) / CAMERA_M;
+}
+
+/** Scene height of the ground at a depth (0 far → 1 near). For the meadow this is footOf()'s 205…277. */
+export function groundY(depth: number, place: Place = MEADOW): number {
+  const horizon = place.horizon * H;
+  return horizon + (H - horizon) * (FAR + depth * (NEAR_GROUND - FAR));
 }
 
 /** How tall a dog of average size is at a spot. */
@@ -104,9 +122,27 @@ const RAINBOW = Array.from({ length: 22 }, (_, i) => {
 });
 
 /** Something standing on the ground: (x, depth) is where its base touches the meadow. */
-function Standing({ x, depth, metres, size, href, shadow = 0.6, night }: { x: number; depth: number; metres: number; size: readonly [number, number]; href: number; shadow?: number; night: boolean }) {
-  const y = groundY(depth);
-  const h = metres * unitsPerMetre(y);
+function Standing({
+  x,
+  depth,
+  metres,
+  size,
+  href,
+  shadow = 0.6,
+  night,
+  place,
+}: {
+  x: number;
+  depth: number;
+  metres: number;
+  size: readonly [number, number];
+  href: number;
+  shadow?: number;
+  night: boolean;
+  place: Place;
+}) {
+  const y = groundY(depth, place);
+  const h = metres * unitsPerMetre(y, place);
   const w = (h * size[0]) / size[1];
   return (
     <G>
@@ -116,7 +152,7 @@ function Standing({ x, depth, metres, size, href, shadow = 0.6, night }: { x: nu
   );
 }
 
-function Flower({ f, night }: { f: PlacedFlower; night: boolean }) {
+function Flower({ f, night, place }: { f: PlacedFlower; night: boolean; place: Place }) {
   const metres = FLOWER_METRES[f.flower] * f.scale;
   const x = f.x * W;
   if (f.flower === "lavender") {
@@ -124,22 +160,22 @@ function Flower({ f, night }: { f: PlacedFlower; night: boolean }) {
     return (
       <G>
         {[-0.6, 0, 0.55].map((dx, i) => (
-          <Standing key={i} x={x + dx * 3} depth={f.depth - i * 0.004} metres={metres * (1 - Math.abs(dx) * 0.15)} size={SIZE.lavender} href={ASSET.lavender} shadow={0} night={night} />
+          <Standing key={i} x={x + dx * 3} depth={f.depth - i * 0.004} metres={metres * (1 - Math.abs(dx) * 0.15)} size={SIZE.lavender} href={ASSET.lavender} shadow={0} night={night} place={place} />
         ))}
       </G>
     );
   }
-  return <Standing x={x} depth={f.depth} metres={metres} size={SIZE[f.flower]} href={ASSET[f.flower]} shadow={0.35} night={night} />;
+  return <Standing x={x} depth={f.depth} metres={metres} size={SIZE[f.flower]} href={ASSET[f.flower]} shadow={0.35} night={night} place={place} />;
 }
 
-function Candle({ x, depth, night }: { x: number; depth: number; night: boolean }) {
-  const y = groundY(depth);
-  const h = 0.1 * unitsPerMetre(y);
+function Candle({ x, depth, night, place }: { x: number; depth: number; night: boolean; place: Place }) {
+  const y = groundY(depth, place);
+  const h = 0.1 * unitsPerMetre(y, place);
   const w = (h * SIZE.candle[0]) / SIZE.candle[1];
   const flameY = y - h * 0.93;
   return (
     <G>
-      <Standing x={x} depth={depth} metres={0.1} size={SIZE.candle} href={ASSET.candle} shadow={0.5} night={night} />
+      <Standing x={x} depth={depth} metres={0.1} size={SIZE.candle} href={ASSET.candle} shadow={0.5} night={night} place={place} />
       {/* The flame lights the night; it isn't dimmed with everything else. */}
       <Circle cx={x} cy={flameY} r={w * (night ? 3.2 : 1.6)} fill="url(#candleGlow)" opacity={night ? 0.9 : 0.35} />
       {night && <Ellipse cx={x} cy={flameY + h * 0.02} rx={w * 0.09} ry={h * 0.13} fill="#ffe9b0" />}
@@ -164,7 +200,7 @@ function Defs_({ night }: { night: boolean }) {
         <Stop offset="1" stopColor="#fdf6d8" stopOpacity={0} />
       </RadialGradient>
       <ClipPath id="aboveGround">
-        <Rect x={0} y={0} width={W} height={HORIZON + 1} />
+        <Rect x={0} y={0} width={W} height={MEADOW_HORIZON + 1} />
       </ClipPath>
       <Filter id="moonlight">
         <FeColorMatrix type="matrix" values={MOONLIGHT} />
@@ -173,20 +209,34 @@ function Defs_({ night }: { night: boolean }) {
   );
 }
 
-/** The photograph, sky, treeline and everything that stands behind the pet. */
-export function PhotoBackdrop({ garden, night, toy }: { garden: GardenState; night: boolean; toy: boolean }) {
+/**
+ * The photograph and everything that stands behind the pet. The meadow also
+ * has its sky: a rainbow by day and stars by night, both setting behind the
+ * treeline. A family's own photo is shown as it is, dimmed to moonlight at night.
+ */
+export function PhotoBackdrop({ garden, night, toy, place = MEADOW }: { garden: GardenState; night: boolean; toy: boolean; place?: Place }) {
   const back: { y: number; node: ReactNode }[] = [];
-  const add = (depth: number, node: ReactNode) => back.push({ y: groundY(depth), node });
+  const add = (depth: number, node: ReactNode) => back.push({ y: groundY(depth, place), node });
 
   const tree = LANDMARKS.tree;
-  add(tree.depth, <Standing key="tree" x={tree.x * W} depth={tree.depth} metres={Math.min(6, 1.2 + garden.treeRings * 0.9)} size={SIZE.tree} href={ASSET.tree} shadow={0.7} night={night} />);
-  add(0.3, <Mailbox key="mailbox" letters={garden.letters} night={night} />);
-  if (garden.treats.length) add(LANDMARKS.bowl.depth, <Standing key="bowl" x={LANDMARKS.bowl.x * W} depth={LANDMARKS.bowl.depth} metres={0.09} size={SIZE.bowl} href={ASSET.bowl} night={night} />);
-  if (toy) add(LANDMARKS.toy.depth, <Standing key="ball" x={LANDMARKS.toy.x * W} depth={LANDMARKS.toy.depth} metres={0.1} size={SIZE.ball} href={ASSET.ball} night={night} />);
-  for (const f of garden.flowers.filter((f) => f.depth < NEAR)) add(f.depth, <Flower key={f.id} f={f} night={night} />);
+  add(tree.depth, <Standing key="tree" x={tree.x * W} depth={tree.depth} metres={Math.min(6, 1.2 + garden.treeRings * 0.9)} size={SIZE.tree} href={ASSET.tree} shadow={0.7} night={night} place={place} />);
+  add(0.3, <Mailbox key="mailbox" letters={garden.letters} night={night} place={place} />);
+  if (garden.treats.length) add(LANDMARKS.bowl.depth, <Standing key="bowl" x={LANDMARKS.bowl.x * W} depth={LANDMARKS.bowl.depth} metres={0.09} size={SIZE.bowl} href={ASSET.bowl} night={night} place={place} />);
+  if (toy) add(LANDMARKS.toy.depth, <Standing key="ball" x={LANDMARKS.toy.x * W} depth={LANDMARKS.toy.depth} metres={0.1} size={SIZE.ball} href={ASSET.ball} night={night} place={place} />);
+  for (const f of garden.flowers.filter((f) => f.depth < NEAR)) add(f.depth, <Flower key={f.id} f={f} night={night} place={place} />);
   for (let i = 0; i < Math.min(garden.candlesLit, 5); i++) {
     const depth = 0.5 - (i % 2) * 0.06;
-    add(depth, <Candle key={`c${i}`} x={292 + i * 14} depth={depth} night={night} />);
+    add(depth, <Candle key={`c${i}`} x={292 + i * 14} depth={depth} night={night} place={place} />);
+  }
+
+  if (place.uri) {
+    return (
+      <G>
+        <Defs_ night={night} />
+        <SvgImage href={{ uri: place.uri }} x={0} y={0} width={W} height={H} preserveAspectRatio="xMidYMid slice" filter={night ? "url(#moonlight)" : undefined} />
+        {back.sort((a, b) => a.y - b.y).map((b) => b.node)}
+      </G>
+    );
   }
 
   return (
@@ -204,7 +254,7 @@ export function PhotoBackdrop({ garden, night, toy }: { garden: GardenState; nig
       ) : (
         <G clipPath="url(#aboveGround)">
           {RAINBOW.map((b, i) => (
-            <Path key={i} d={`M ${310 - b.r} ${HORIZON + 4} A ${b.r} ${b.r * 0.86} 0 0 1 ${310 + b.r} ${HORIZON + 4}`} stroke={b.colour} strokeOpacity={b.opacity} strokeWidth={1.1} fill="none" />
+            <Path key={i} d={`M ${310 - b.r} ${MEADOW_HORIZON + 4} A ${b.r} ${b.r * 0.86} 0 0 1 ${310 + b.r} ${MEADOW_HORIZON + 4}`} stroke={b.colour} strokeOpacity={b.opacity} strokeWidth={1.1} fill="none" />
           ))}
         </G>
       )}
@@ -215,7 +265,7 @@ export function PhotoBackdrop({ garden, night, toy }: { garden: GardenState; nig
 }
 
 /** Flowers near enough to stand in front of the pet. */
-export function PhotoFront({ garden, night }: { garden: GardenState; night: boolean }) {
+export function PhotoFront({ garden, night, place = MEADOW }: { garden: GardenState; night: boolean; place?: Place }) {
   return (
     <G>
       <Defs_ night={night} />
@@ -223,16 +273,16 @@ export function PhotoFront({ garden, night }: { garden: GardenState; night: bool
         .filter((f) => f.depth >= NEAR)
         .sort((a, b) => a.depth - b.depth)
         .map((f) => (
-          <Flower key={f.id} f={f} night={night} />
+          <Flower key={f.id} f={f} night={night} place={place} />
         ))}
     </G>
   );
 }
 
-function Mailbox({ letters, night }: { letters: number; night: boolean }) {
+function Mailbox({ letters, night, place }: { letters: number; night: boolean; place: Place }) {
   const x = 352, depth = 0.3;
-  const y = groundY(depth);
-  const u = unitsPerMetre(y);
+  const y = groundY(depth, place);
+  const u = unitsPerMetre(y, place);
   const post = { w: 0.09 * u, h: 0.95 * u };
   const box = { w: 0.5 * u, h: (0.5 * u * SIZE.mailbox[1]) / SIZE.mailbox[0] };
   return (

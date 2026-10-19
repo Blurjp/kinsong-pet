@@ -18,7 +18,7 @@ npm run web                             # quick look in a browser
 
 ### iOS Simulator (needs a Mac with Xcode)
 
-Everything except video clips works in Expo Go, so the quickest way is:
+Everything except video clips and the home-screen widget works in Expo Go, so the quickest way is:
 
 ```sh
 cd app

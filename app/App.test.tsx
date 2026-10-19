@@ -8,6 +8,7 @@ import * as media from "./src/media";
 jest.mock("./src/media", () => ({
   pickPhotos: jest.fn(async () => ["file:///photos/max-1.jpg"]),
   pickRecording: jest.fn(async () => "file:///sounds/bark.m4a"),
+  pickPlacePhoto: jest.fn(async () => "file:///places/backyard.jpg"),
   importVideoClip: jest.fn(async () => ({
     dir: "file:///clips/new/",
     videoUri: "file:///clips/new/clip.mov",
@@ -198,6 +199,20 @@ describe("Kinsong Pets", () => {
 });
 
 describe("Memories", () => {
+  it("lets the real pet live somewhere it loved, and go back to the meadow", async () => {
+    await render(<PetsApp initial={seeded({ clips: [barkClip] })} />);
+    await fireEvent.press(screen.getByText("Memories"));
+    await fireEvent.press(screen.getByText("Choose a photo"));
+    expect(await screen.findByText(/Drag the line to where the ground meets the distance, so Max/)).toBeTruthy();
+    let saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.place).toEqual({ uri: "file:///places/backyard.jpg", horizon: 0.55 });
+    expect(screen.getByLabelText(/Their place/)).toBeTruthy();
+    await fireEvent.press(screen.getByText("Back to the meadow"));
+    saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.place).toBeUndefined();
+    expect(media.forget).toHaveBeenCalledWith("file:///places/backyard.jpg");
+  });
+
   it("adds a video clip and lets you tag what they're doing and which way they face", async () => {
     await render(<PetsApp initial={seeded()} />);
     await fireEvent.press(screen.getByText("Memories"));

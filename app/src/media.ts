@@ -44,6 +44,24 @@ export async function pickPhotos(): Promise<string[]> {
   return out;
 }
 
+/**
+ * Let the owner choose a photo of somewhere the pet loved, cropped to the
+ * garden's 4:3 on the phone. Returns a stored URI.
+ */
+export async function pickPlacePhoto(): Promise<string | undefined> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1 });
+  const a = r.canceled ? undefined : r.assets[0];
+  if (!a) return undefined;
+  const w = a.width, h = a.height;
+  const crop = w / h > 4 / 3 ? { width: Math.round((h * 4) / 3), height: h } : { width: w, height: Math.round((w * 3) / 4) };
+  const out = await manipulateAsync(
+    a.uri,
+    [{ crop: { originX: Math.round((w - crop.width) / 2), originY: Math.round((h - crop.height) / 2), ...crop } }, { resize: { width: 1440 } }],
+    { compress: 0.86, format: SaveFormat.JPEG, base64: isWeb },
+  );
+  return isWeb ? `data:image/jpeg;base64,${out.base64}` : keepNative(out.uri, `place-${Date.now()}.jpg`);
+}
+
 async function blobToDataUri(uri: string): Promise<string> {
   const blob = await (await fetch(uri)).blob();
   if (blob.size > MAX_WEB_AUDIO_BYTES) throw new Error("That recording is too long for the web preview. Try a clip under about 30 seconds.");
