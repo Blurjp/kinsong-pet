@@ -32,6 +32,45 @@ public class PetCutoutModule: Module {
       try WidgetShare.write(info: info, background: background, pet: pet, closeUp: closeUp)
     }
 
+    // "Bring to life": the stills the generated clips start from, made on the device.
+    AsyncFunction("cutOutPhoto") { (photo: URL, out: URL) throws -> [String: Any] in
+      do {
+        let cut = try Keyframe.cutOut(photo: photo, to: out)
+        return ["uri": cut.url.absoluteString, "width": cut.width, "height": cut.height, "closeUp": cut.closeUp]
+      } catch let e as ClipCutterError {
+        throw CutOutException(e.description)
+      }
+    }
+
+    AsyncFunction("composeKeyframe") { (pet: URL, scene: URL, out: URL, feetX: Double, feetY: Double, height: Double) throws -> String in
+      do {
+        return try Keyframe.compose(pet: pet, scene: scene, to: out, feet: CGPoint(x: feetX, y: feetY), height: CGFloat(height)).absoluteString
+      } catch let e as ClipCutterError {
+        throw CutOutException(e.description)
+      }
+    }
+
+    AsyncFunction("lastFrame") { (video: URL, out: URL) async throws -> String in
+      do {
+        return try await Keyframe.lastFrame(of: video, to: out).absoluteString
+      } catch let e as ClipCutterError {
+        throw CutOutException(e.description)
+      }
+    }
+
+    View(AliveView.self) {
+      Events("onActionEnd")
+      Prop("loopUri") { (view: AliveView, uri: String?) in
+        view.setLoop(uri)
+      }
+      Prop("action") { (view: AliveView, action: [String: Any]?) in
+        view.setAction(action)
+      }
+      Prop("night") { (view: AliveView, night: Bool?) in
+        view.setNight(night ?? false)
+      }
+    }
+
     View(PetClipView.self) {
       Prop("uri") { (view: PetClipView, uri: String?) in
         view.setUri(uri)
@@ -117,12 +156,7 @@ final class PetClipView: ExpoView {
     if night {
       item.videoComposition = AVVideoComposition(asset: item.asset) { request in
         // Scaling colour alone keeps premultiplied alpha valid, so the see-through edges survive.
-        let moonlit = request.sourceImage.applyingFilter("CIColorMatrix", parameters: [
-          "inputRVector": CIVector(x: 0.42, y: 0, z: 0, w: 0),
-          "inputGVector": CIVector(x: 0, y: 0.48, z: 0, w: 0),
-          "inputBVector": CIVector(x: 0, y: 0, z: 0.66, w: 0),
-        ])
-        request.finish(with: moonlit, context: nil)
+        request.finish(with: Moonlight.apply(request.sourceImage), context: nil)
       }
     }
     looper = AVPlayerLooper(player: player, templateItem: item)
@@ -204,5 +238,145 @@ enum WidgetShare {
     }
     CGImageDestinationAddImage(dest, image, nil)
     guard CGImageDestinationFinalize(dest) else { throw CutOutException("Couldn't save the widget's picture.") }
+  }
+}
+
+/**
+ The pet brought to life: full-frame generated clips that all start and end on
+ the same key frame. A loop (resting, or asleep) plays on repeat; an action
+ fades in over it, and when it ends, on that same frame, the loop takes over
+ again from its start, so the joins can't be seen.
+ */
+final class AliveView: ExpoView {
+  let onActionEnd = EventDispatcher()
+
+  private let loopPlayer = AVQueuePlayer()
+  private let loopLayer = AVPlayerLayer()
+  private var looper: AVPlayerLooper?
+  private var loopUri: String?
+  private let actionPlayer = AVPlayer()
+  private let actionLayer = AVPlayerLayer()
+  private var actionKey: Int?
+  private var actionThen: String?
+  private var playingAction = false
+  private var night = false
+  private var endObserver: NSObjectProtocol?
+
+  required init(appContext: AppContext? = nil) {
+    super.init(appContext: appContext)
+    clipsToBounds = true
+    backgroundColor = .black
+    for (player, layer) in [(loopPlayer as AVPlayer, loopLayer), (actionPlayer, actionLayer)] {
+      player.isMuted = true // their real voice is played separately, in step
+      player.preventsDisplaySleepDuringVideoPlayback = false
+      layer.player = player
+      layer.videoGravity = .resizeAspectFill
+      self.layer.addSublayer(layer)
+    }
+    actionLayer.opacity = 0
+    actionPlayer.actionAtItemEnd = .pause // hold the last frame until the loop is back on it
+  }
+
+  deinit {
+    looper?.disableLooping()
+    if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    loopLayer.frame = bounds
+    actionLayer.frame = bounds
+    CATransaction.commit()
+  }
+
+  func setLoop(_ uri: String?) {
+    guard uri != loopUri else { return }
+    loopUri = uri
+    if !playingAction { startLoop() }
+  }
+
+  func setNight(_ next: Bool) {
+    guard next != night else { return }
+    night = next
+    startLoop()
+  }
+
+  /** { uri, key, then? }: a new key plays the clip; `then` is the loop to carry on with afterwards. */
+  func setAction(_ action: [String: Any]?) {
+    guard let action, let uri = action["uri"] as? String, let url = URL(string: uri) else { return }
+    let key = (action["key"] as? Int) ?? 0
+    guard key != actionKey else { return }
+    actionKey = key
+    actionThen = action["then"] as? String
+    let item = item(for: url)
+    if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+    endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+      self?.actionEnded()
+    }
+    actionPlayer.replaceCurrentItem(with: item)
+    actionPlayer.seek(to: .zero)
+    actionPlayer.play()
+    playingAction = true
+    CATransaction.begin()
+    CATransaction.setAnimationDuration(0.28)
+    actionLayer.opacity = 1
+    CATransaction.commit()
+  }
+
+  private func actionEnded() {
+    if let then = actionThen { loopUri = then }
+    playingAction = false
+    // The action ended on the key frame; start the loop from its first frame (the same picture),
+    // and only then let go of the action, so nothing visibly changes.
+    startLoop { [weak self] in
+      guard let self else { return }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      self.actionLayer.opacity = 0
+      CATransaction.commit()
+      self.onActionEnd(["key": self.actionKey ?? 0])
+    }
+  }
+
+  private func startLoop(ready: (() -> Void)? = nil) {
+    looper?.disableLooping()
+    loopPlayer.removeAllItems()
+    looper = nil
+    guard let loopUri, let url = URL(string: loopUri) else { ready?(); return }
+    looper = AVPlayerLooper(player: loopPlayer, templateItem: item(for: url))
+    loopPlayer.play()
+    guard let ready else { return }
+    // Give the loop a moment to put its first frame on screen before the action layer goes.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: ready)
+  }
+
+  private func item(for url: URL) -> AVPlayerItem {
+    let item = AVPlayerItem(url: url)
+    if night {
+      item.videoComposition = AVVideoComposition(asset: item.asset) { request in
+        request.finish(with: Moonlight.apply(request.sourceImage), context: nil)
+      }
+    }
+    return item
+  }
+}
+
+/**
+ Daylight footage under a night sky, matching the night photos: mostly
+ desaturated, then darker and bluer. Core Image works in linear light, so the
+ display-space factors (0.42, 0.48, 0.66) are raised to the power 2.2 here.
+ Scaling colour alone keeps premultiplied alpha valid, so see-through edges survive.
+ */
+enum Moonlight {
+  static func apply(_ image: CIImage) -> CIImage {
+    image
+      .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.4])
+      .applyingFilter("CIColorMatrix", parameters: [
+        "inputRVector": CIVector(x: 0.148, y: 0, z: 0, w: 0),
+        "inputGVector": CIVector(x: 0, y: 0.2, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: 0.4, w: 0),
+      ])
   }
 }

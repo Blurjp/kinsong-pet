@@ -44,6 +44,12 @@ export async function pickPhotos(): Promise<string[]> {
   return out;
 }
 
+/** One photo, full size, for cutting the pet out of. Returns the picker's URI (kept only until it's cut out). */
+export async function pickOnePhoto(): Promise<string | undefined> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1 });
+  return r.canceled ? undefined : r.assets[0]?.uri;
+}
+
 /**
  * Let the owner choose a photo of somewhere the pet loved, cropped to the
  * garden's 4:3 on the phone. Returns a stored URI.

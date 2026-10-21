@@ -1,0 +1,6 @@
+# Copy to .dev.vars (never committed) for `npm run dev`.
+RUNWARE_API_KEY=your-runware-key
+APP_TOKEN=a-long-random-string
+# MOCK=1 answers every request with MOCK_VIDEO_URL instead of calling Runware.
+# MOCK=1
+# MOCK_VIDEO_URL=https://example.com/sample.mp4

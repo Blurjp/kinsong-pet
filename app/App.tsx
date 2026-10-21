@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { StoreProvider, today, useStore, type PetState } from "./src/state/store";
 import { scheduleReminders } from "./src/reminders";
 import { refreshWidget } from "./src/widget";
+import { useAliveMaker } from "./src/alive/useAliveMaker";
 import { SetupScreen } from "./src/screens/SetupScreen";
 import { GardenScreen } from "./src/screens/GardenScreen";
 import { WishesScreen } from "./src/screens/WishesScreen";
@@ -23,6 +24,7 @@ type Tab = (typeof TABS)[number]["key"] | "edit";
 function Shell() {
   const { state, ready } = useStore();
   const [tab, setTab] = useState<Tab>("garden");
+  useAliveMaker();
   // Keep the next year of remembrance-day reminders scheduled (or none, when they're off).
   useEffect(() => {
     if (ready) void scheduleReminders(state.pet, !!state.remindersOn, today()).catch(() => undefined);

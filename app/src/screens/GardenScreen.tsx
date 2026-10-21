@@ -26,6 +26,10 @@ import {
 } from "@sinian/core";
 import { newId, today, useStore } from "../state/store";
 import { GardenScene, walkMs } from "../components/GardenScene";
+import { AliveStage } from "../components/AliveStage";
+import { sceneById } from "../alive/scenes";
+import { sceneProgress, type AliveAction } from "../alive/types";
+import { useAlivePet } from "../alive/useAlivePet";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { play } from "../media";
 import { Button, Card, Chip, Field, Note, colors, s } from "../ui";
@@ -103,6 +107,19 @@ export function GardenScreen({
   // The real pet's caption says what the footage shows: on its way somewhere, it's walking.
   const literal = clip && (live.stayed || live.pose === "walk" || !wanted.includes(clip.action));
   const caption = clip && literal ? clipCaption(pet.name, clip.action, night) : live.caption;
+  // Brought to life: generated clips of the pet in a photographed scene, once the family has made one.
+  const aliveScene = sceneById(state.alive?.scene);
+  const aliveState = aliveScene && state.alive?.scenes[aliveScene.id];
+  const alive = !!(state.alive?.consent && aliveScene && aliveState && sceneProgress(aliveState).ready);
+  const alivePet = useAlivePet({
+    name: pet.name,
+    species: pet.species,
+    place: aliveScene?.title.toLowerCase() ?? "garden",
+    scene: alive ? aliveState : undefined,
+    night,
+    autoplay,
+  });
+
   const [restartKey, setRestartKey] = useState(0);
   const [holdUntil, setHoldUntil] = useState(0); // pause the life loop while a reaction plays out
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -145,6 +162,15 @@ export function GardenScreen({
   const respond = useCallback(
     (i: Interaction, treat?: string) => {
       const r = react(i, { name: pet.name, species: pet.species, here: live.at, toy, treat });
+      if (alive) {
+        const ALIVE: Record<Interaction, AliveAction> = { pet: "happy", call: "bark", play: "play", treat: "eat" };
+        if (!alivePet.run(ALIVE[i]) || !state.soundOn) return;
+        // Their real voice: a bark from their own video if there is one, otherwise their recordings.
+        const bark = i === "call" ? state.clips.find((c) => c.action === "bark" && c.audioUri)?.audioUri : undefined;
+        const uri = bark ?? pickSound(state.sounds, r.sounds, nextSeed())?.uri;
+        if (uri) play(uri);
+        return;
+      }
       const at = place(r.at);
       clearTimeout(settle.current);
       // The real pet walks over first, then reacts; the storybook pet does both at once.
@@ -156,7 +182,7 @@ export function GardenScreen({
     },
     // nextSeed only touches a ref; place, walkTime and perform only read what's listed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips],
+    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips, alive, alivePet],
   );
 
   // Every gesture is free and leaves something that stays.
@@ -175,21 +201,35 @@ export function GardenScreen({
         </View>
       )}
 
-      <GardenScene
-        pet={pet}
-        garden={garden}
-        at={live.at}
-        pose={live.pose}
-        clip={clip}
-        restartKey={restartKey}
-        place={state.place}
-        night={night}
-        photos={state.photos}
-        heartsKey={heartsKey}
-        onPetPress={() => respond("pet")}
-        onPhotoPress={setViewing}
-      />
-      {clip && state.photos.length > 0 && (
+      {alive && aliveScene && aliveState ? (
+        <AliveStage
+          name={pet.name}
+          scene={aliveScene}
+          state={aliveState}
+          garden={garden}
+          night={night}
+          loopUri={alivePet.loopUri}
+          action={alivePet.action}
+          onActionEnd={alivePet.onActionEnd}
+          onPetPress={() => respond("pet")}
+        />
+      ) : (
+        <GardenScene
+          pet={pet}
+          garden={garden}
+          at={live.at}
+          pose={live.pose}
+          clip={clip}
+          restartKey={restartKey}
+          place={state.place}
+          night={night}
+          photos={state.photos}
+          heartsKey={heartsKey}
+          onPetPress={() => respond("pet")}
+          onPhotoPress={setViewing}
+        />
+      )}
+      {(clip || alive) && state.photos.length > 0 && (
         // In the photographed meadow the family's photos sit under the scene, like prints laid out.
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           {state.photos.slice(0, 5).map((p, i) => (
@@ -202,12 +242,21 @@ export function GardenScreen({
         </View>
       )}
       <Text style={{ color: colors.ink, fontSize: 15, marginTop: 8, minHeight: 40 }} accessibilityLiveRegion="polite">
-        {caption}
+        {alive ? alivePet.caption : caption}
       </Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>
-        ✦ A simulation of {pet.name}
-        {clip ? ", made from your own video" : ""}
-        {state.sounds.length ? ", with your own recordings of their voice" : ""}.
+        {alive ? (
+          <>
+            ✦ Brought to life by AI from your {state.alive?.pet?.from === "video" ? "video" : "photo"} of {pet.name}. Imagined, not filmed
+            {state.sounds.length || state.clips.some((c) => c.audioUri) ? "; the voice is their own" : ""}.
+          </>
+        ) : (
+          <>
+            ✦ A simulation of {pet.name}
+            {clip ? ", made from your own video" : ""}
+            {state.sounds.length ? ", with your own recordings of their voice" : ""}.
+          </>
+        )}
       </Text>
 
       <View style={[s.row, { marginTop: 8 }]}>

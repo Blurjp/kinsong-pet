@@ -4,6 +4,7 @@ A quiet memorial garden by the Rainbow Bridge for a pet who has passed. The pet 
 
 - `app/` is the Expo (React Native) app. See [app/README.md](app/README.md) for features and product rules.
 - `core/` is the pure TypeScript logic shared with the app: remembrance days, the garden, the pet's behaviour, and reading colours from a photo. It has unit tests.
+- `server/` is a small Cloudflare Worker for the opt-in "bring them to life" feature: it holds the video service's key and turns a pet's key frame into seamless action clips. See [server/README.md](server/README.md).
 - `docs/MEMORIAL_GARDEN.md` has the market and ethics research behind it.
 
 Split out of [Blurjp/kinsong](https://github.com/Blurjp/kinsong) (`pets/` and `core/`, as of `3ab96c4`).

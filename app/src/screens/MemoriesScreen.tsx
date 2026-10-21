@@ -4,6 +4,7 @@ import { CLIP_ACTIONS, SOUND_TAGS, type ClipAction, type PetPhoto, type PetProfi
 import { newId, today, useStore } from "../state/store";
 import { coatFromPhoto, forget, importVideoClip, pickPhotos, pickPlacePhoto, pickRecording, play } from "../media";
 import { PlaceEditor } from "../components/PlaceEditor";
+import { AliveCard } from "../components/AliveCard";
 import { ClipPlayer } from "../components/ClipPlayer";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, Card, Chip, Note, colors, s } from "../ui";
@@ -191,6 +192,8 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
         {cutting !== undefined && <Note>{`Bringing ${pet.name} out of the video… ${Math.round(cutting * 100)}%`}</Note>}
         <Button label={busy ? "Working…" : "Add a video"} onPress={addVideo} disabled={busy} />
       </Card>
+
+      <AliveCard pet={pet} />
 
       <Card title="Their place">
         <Note>

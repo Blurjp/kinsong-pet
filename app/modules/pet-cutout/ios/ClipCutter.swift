@@ -255,6 +255,11 @@ enum ClipCutter {
     return Found(track: pets, cutout: true, closeUp: closeUp, facing: drift < -0.08 ? "left" : "right")
   }
 
+  /** The pet's outline in a still, for Keyframe. */
+  static func petMask(for image: CIImage) -> CIImage? {
+    mask(for: image)
+  }
+
   /** The pet's outline in this frame, softened a touch so no background fringe shows; nil when there's no clear pet. */
   private static func mask(for image: CIImage) -> CIImage? {
     guard #available(iOS 17.0, macOS 14.0, *) else { return nil }

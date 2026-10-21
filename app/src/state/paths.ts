@@ -29,5 +29,20 @@ export function relocateState(s: PetState, documents = currentDocuments()): PetS
     sounds: s.sounds.map((c) => ({ ...c, uri: r(c.uri) })),
     clips: s.clips.map((c) => ({ ...c, dir: r(c.dir), videoUri: r(c.videoUri), posterUri: r(c.posterUri), audioUri: c.audioUri && r(c.audioUri) })),
     place: s.place && { ...s.place, uri: r(s.place.uri) },
+    alive: s.alive && {
+      ...s.alive,
+      pet: s.alive.pet && { ...s.alive.pet, uri: r(s.alive.pet.uri) },
+      scenes: Object.fromEntries(
+        Object.entries(s.alive.scenes).map(([id, sc]) => [
+          id,
+          {
+            ...sc,
+            key: sc.key && r(sc.key),
+            sleepKey: sc.sleepKey && r(sc.sleepKey),
+            clips: Object.fromEntries(Object.entries(sc.clips).map(([a, uri]) => [a, uri && r(uri)])),
+          },
+        ]),
+      ),
+    },
   };
 }

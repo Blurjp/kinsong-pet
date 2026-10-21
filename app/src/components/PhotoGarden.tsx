@@ -44,6 +44,8 @@ export interface Place {
   /** The family's own photo; absent for the meadow. */
   uri?: string;
   horizon: number;
+  /** How high the camera was, in metres, which sets how big things are; about a dog's eye height by default. */
+  cameraMetres?: number;
 }
 
 export const MEADOW: Place = { horizon: MEADOW_HORIZON / H };
@@ -54,7 +56,7 @@ const NEAR_GROUND = (277 - MEADOW_HORIZON) / (H - MEADOW_HORIZON);
 
 /** Scene units per metre for something standing at scene height y. */
 export function unitsPerMetre(y: number, place: Place = MEADOW): number {
-  return Math.max(0, y - place.horizon * H) / CAMERA_M;
+  return Math.max(0, y - place.horizon * H) / (place.cameraMetres ?? CAMERA_M);
 }
 
 /** Scene height of the ground at a depth (0 far → 1 near). For the meadow this is footOf()'s 205…277. */
@@ -299,6 +301,31 @@ function Mailbox({ letters, night, place }: { letters: number; night: boolean; p
           </SvgText>
         </G>
       )}
+    </G>
+  );
+}
+
+/**
+ * The family's flowers and candles over a brought-to-life scene. The pet is
+ * part of the video there and moves about its spot, so nothing is drawn in its
+ * column, in front or behind: a flat flower over a living animal gives it away.
+ */
+export function SceneThings({ garden, night, place, pet }: { garden: GardenState; night: boolean; place: Place; pet: { x: number; width: number } }) {
+  const items: { y: number; x: number; node: ReactNode }[] = [];
+  for (const f of garden.flowers) items.push({ y: groundY(f.depth, place), x: f.x * W, node: <Flower key={f.id} f={f} night={night} place={place} /> });
+  for (let i = 0; i < Math.min(garden.candlesLit, 5); i++) {
+    const depth = 0.62 - (i % 2) * 0.05;
+    items.push({ y: groundY(depth, place), x: 292 + i * 14, node: <Candle key={`c${i}`} x={292 + i * 14} depth={depth} night={night} place={place} /> });
+  }
+  // Wider than the pet: it wanders a few steps either way when it walks.
+  const left = (pet.x - pet.width) * W, right = (pet.x + pet.width) * W;
+  return (
+    <G>
+      <Defs_ night={night} />
+      {items
+        .filter((it) => it.x < left || it.x > right)
+        .sort((a, b) => a.y - b.y)
+        .map((it) => it.node)}
     </G>
   );
 }

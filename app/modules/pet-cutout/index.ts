@@ -34,6 +34,12 @@ export interface CutOutOptions {
 interface PetCutoutNative {
   cutOut(videoUri: string, outDir: string, options: CutOutOptions): Promise<CutOutResult>;
   addListener(event: "onProgress", listener: (e: { progress: number }) => void): EventSubscription;
+  /** The pet from a still photo, on transparency. */
+  cutOutPhoto(photo: string, out: string): Promise<{ uri: string; width: number; height: number; closeUp: boolean }>;
+  /** The pet standing in a scene, light-matched with a contact shadow: the key frame clips start and end on. */
+  composeKeyframe(pet: string, scene: string, out: string, feetX: number, feetY: number, height: number): Promise<string>;
+  /** A clip's last frame as a JPEG. */
+  lastFrame(video: string, out: string): Promise<string>;
   /** Share the widget's picture (pet cut-out on its place) and remembrance days with the home-screen widget. */
   updateWidget(info: WidgetInfo, background: string | null, pet: string | null, closeUp: boolean): Promise<void>;
 }
@@ -47,8 +53,20 @@ export interface PetClipViewProps extends ViewProps {
   night?: boolean;
 }
 
+export interface AliveViewProps extends ViewProps {
+  /** Plays on repeat: resting, or asleep. */
+  loopUri?: string;
+  /** A new `key` plays `uri` over the loop; `then` replaces the loop when it ends. */
+  action?: { uri: string; key: number; then?: string };
+  night?: boolean;
+  onActionEnd?: (e: { nativeEvent: { key: number } }) => void;
+}
+
 /** Undefined on web and in Expo Go, where the native module isn't built in. */
 export const PetCutout = requireOptionalNativeModule<PetCutoutNative>("PetCutout") ?? undefined;
 
 /** The see-through, looping clip view; undefined wherever PetCutout is. */
-export const PetClipView: ComponentType<PetClipViewProps> | undefined = PetCutout ? requireNativeViewManager<PetClipViewProps>("PetCutout") : undefined;
+export const PetClipView: ComponentType<PetClipViewProps> | undefined = PetCutout ? requireNativeViewManager<PetClipViewProps>("PetCutout", "PetClipView") : undefined;
+
+/** The brought-to-life player; undefined wherever PetCutout is. */
+export const AliveView: ComponentType<AliveViewProps> | undefined = PetCutout ? requireNativeViewManager<AliveViewProps>("PetCutout", "AliveView") : undefined;
