@@ -14,7 +14,23 @@ const BALL = require("../../assets/garden/ball.png");
  * scene, played with by touch (stroke it, tap the ground, flick the ball) and
  * by the buttons below it.
  */
-export function PlayStage({ name, play, scene, night, command, onEvent }: { name: string; play: PlayState; scene: AliveScene; night: boolean; command?: PlayCommand; onEvent: (type: string) => void }) {
+export function PlayStage({
+  name,
+  species,
+  play,
+  scene,
+  night,
+  command,
+  onEvent,
+}: {
+  name: string;
+  species: string;
+  play: PlayState;
+  scene: AliveScene;
+  night: boolean;
+  command?: PlayCommand;
+  onEvent: (type: string) => void;
+}) {
   const [files, setFiles] = useState<{ scene: string; background: string; ball: string }>();
   useEffect(() => {
     let live = true;
@@ -39,6 +55,7 @@ export function PlayStage({ name, play, scene, night, command, onEvent }: { name
           horizon={scene.horizon}
           cameraMetres={place.cameraMetres}
           night={night}
+          species={species}
           command={command}
           onPlayEvent={(e) => onEvent(e.nativeEvent.type)}
         />

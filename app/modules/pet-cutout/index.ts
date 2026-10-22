@@ -41,7 +41,7 @@ interface PetCutoutNative {
   /** A clip's last frame as a JPEG. */
   lastFrame(video: string, out: string): Promise<string>;
   /** The pet's skeleton in a cut-out photo: joint name → [x, y, confidence], fractions from the top left. */
-  petRig(cutout: string): Promise<Record<string, number[]>>;
+  petRig(cutout: string, species?: string): Promise<Record<string, number[]>>;
   /** Share the widget's picture (pet cut-out on its place) and remembrance days with the home-screen widget. */
   updateWidget(info: WidgetInfo, background: string | null, pet: string | null, closeUp: boolean): Promise<void>;
 }
@@ -81,6 +81,8 @@ export interface PlayViewProps extends ViewProps {
   horizon?: number;
   cameraMetres?: number;
   night?: boolean;
+  /** How it moves and plays: dogs fetch, cats pounce, rabbits hop. */
+  species?: string;
   /** A new `key` sends the command. */
   command?: { kind: "call" | "play" | "pet" | "treat"; key: number };
   onPlayEvent?: (e: { nativeEvent: { type: string } }) => void;
@@ -92,6 +94,7 @@ export const PlayView: ComponentType<PlayViewProps> | undefined = PetCutout ? re
 export interface ARPlayViewProps extends ViewProps {
   pet?: { uri: string; rig: Record<string, number[]> };
   ball?: string;
+  species?: string;
   command?: { kind: "call" | "play" | "pet" | "treat"; key: number };
   /** Play events, plus "ar-unsupported", "ar-find-floor" and "ar-placed". */
   onPlayEvent?: (e: { nativeEvent: { type: string } }) => void;

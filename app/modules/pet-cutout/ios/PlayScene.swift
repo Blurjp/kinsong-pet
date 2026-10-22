@@ -88,9 +88,17 @@ final class PlayScene: SKScene {
     /** Which way the asleep photo faces; mirrored to match the puppet. */
     var asleepFacesRight: Bool
     var night: Bool
+    /** "dog", "cat", "rabbit", "bird" or "other": how it moves and plays. */
+    var species: String = "dog"
   }
 
-  enum Mood: String { case rest, wander, sniff, bow, petted, run, chase, carry, sleep }
+  enum Mood: String { case rest, wander, sniff, bow, petted, run, chase, carry, sleep, groom, lookout, binky, pounce, nudge }
+
+  private var isCat: Bool { setup.species == "cat" }
+  /** Rabbits (and small pets like them) hop rather than walk. */
+  private var hops: Bool { setup.species == "rabbit" || setup.species == "bird" }
+  private var moodStarted: TimeInterval = 0
+  private var turnedInAir = false
 
   /** Something worth telling the app: what the pet is doing (for the caption) and sounds to play. */
   var onEvent: ((String) -> Void)?
@@ -226,7 +234,17 @@ final class PlayScene: SKScene {
     return abs(b.y - a.y)
   }
 
-  private var petHeight: CGFloat { PlayScene.dogMetres * pointsPerMetre(pos) }
+  /** How tall the pet's photo stands in real life, ears or raised tail included. */
+  private var petMetres: CGFloat {
+    switch setup.species {
+    case "cat": return 0.38
+    case "rabbit": return 0.35
+    case "bird": return 0.18
+    default: return PlayScene.dogMetres
+    }
+  }
+
+  private var petHeight: CGFloat { petMetres * pointsPerMetre(pos) }
 
   // MARK: - Life
 
@@ -277,13 +295,24 @@ final class PlayScene: SKScene {
     case ..<0.4:
       go(to: place.randomSpot(), run: false)
       mood = .wander; onEvent?("wander")
-    case ..<0.65:
-      mood = .sniff; moodUntil = now + 3.5; onEvent?("sniff")
-    case ..<0.8:
-      mood = .bow; moodUntil = now + 2.2; happyUntil = now + 3; onEvent?("bow")
+    case ..<0.6:
+      // Dogs sniff, cats wash, rabbits nibble.
+      set(isCat && Bool.random() ? .groom : .sniff, for: 3.5)
+    case ..<0.75:
+      if hops { set(.lookout, for: 3) } else { set(.bow, for: 2.2); happyUntil = now + 3 }
+    case ..<0.82:
+      if hops { set(.binky, for: 0.9); happyUntil = now + 3 } else { lookAt = screen(place.you(), up: 1) }
     default:
       lookAt = screen(place.you(), up: 1)
     }
+  }
+
+  private func set(_ next: Mood, for seconds: TimeInterval) {
+    mood = next
+    moodStarted = now
+    turnedInAir = false
+    moodUntil = now + seconds
+    onEvent?(next.rawValue)
   }
 
   private func go(to point: CGPoint, run: Bool) {
@@ -295,7 +324,7 @@ final class PlayScene: SKScene {
     guard let t = target else { return }
     let dx = t.x - pos.x, dy = t.y - pos.y
     let dist = hypot(dx, dy)
-    let speed = m(running ? 2.5 : 0.8)
+    let speed = m(running ? (hops ? 1.8 : 2.5) : (isCat ? 0.6 : hops ? 0.7 : 0.8))
     if dist < m(0.07) {
       target = nil
       arrived()
@@ -306,11 +335,22 @@ final class PlayScene: SKScene {
     pos.y += dy / dist * step
     // Face the way it's going, as seen on screen.
     if let a = screen(pos), let b = screen(t), abs(b.x - a.x) > 2 { facingRight = b.x > a.x }
-    phase += dt * (running ? 13 : 7.5)
+    phase += dt * (hops ? (running ? 15 : 11) : running ? 13 : isCat ? 6 : 7.5)
   }
 
   private func arrived() {
     switch mood {
+    case .chase where !ballFlying && hypot(ballAt.x - pos.x, ballAt.y - pos.y) < m(0.45) && setup.species != "dog":
+      // Cats pounce on it and bat it away; rabbits nose it along. Only dogs bring it back.
+      set(isCat ? .pounce : .nudge, for: isCat ? 1.3 : 1.2)
+      happyUntil = now + 4
+      let push: CGFloat = isCat ? 1.6 : 0.6
+      let a = CGFloat.random(in: 0...(2 * .pi))
+      run(.wait(forDuration: isCat ? 0.8 : 0.6)) { [weak self] in
+        guard let self else { return }
+        self.ballVelocity = (x: cos(a) * self.m(push), depth: sin(a) * self.m(push), up: self.isCat ? 1.5 : 0.3)
+        self.ballFlying = true
+      }
     case .chase:
       if !ballFlying && hypot(ballAt.x - pos.x, ballAt.y - pos.y) < m(0.45) {
         ballCarried = true
@@ -347,6 +387,18 @@ final class PlayScene: SKScene {
     p.tailTip = happy ? 0.3 * sin(t * 18 - 0.8) : 0.1 * sin(t * 3 - 0.6)
     p.ears = 0.05 * sin(t * 0.7) + (sin(t * 0.37) > 0.97 ? 0.25 : 0)
 
+    if target != nil && hops {
+      // Hops: push off with the back legs, reach with the front, nose up then down.
+      let up = max(0, sin(phase))
+      p.lift = (running ? 0.24 : 0.14) * up
+      p.pitch = 0.16 * cos(phase)
+      p.back = [-0.7 * up, -0.7 * up]
+      p.backKnee = [0.5 * up, 0.5 * up]
+      p.front = [0.6 * up, 0.6 * up]
+      p.head = 0.08 * cos(phase)
+      p.ears = -0.15 * up
+      return p
+    }
     if target != nil {
       let s = sin(phase), c = cos(phase)
       if running {
@@ -365,11 +417,23 @@ final class PlayScene: SKScene {
         p.back = [-0.28 * s, 0.28 * s]
         p.frontKnee = [min(0, s) * 0.5, min(0, -s) * 0.5]
         p.backKnee = [max(0, s) * 0.4, max(0, -s) * 0.4]
-        p.lift = 0.012 * abs(c)
+        p.lift = (isCat ? 0.006 : 0.012) * abs(c)
         p.head = 0.03 * sin(phase * 2)
+        if isCat { p.tail = 0.5 + 0.12 * sin(t * 1.6); p.tailTip = 0.3 }
       }
       return p
     }
+    if isCat && mood != .sleep && !happy {
+      // A cat's tail: held up, swaying slowly.
+      p.tail = 0.4 + 0.15 * sin(t * 1.2)
+      p.tailTip = 0.35 * sin(t * 1.2 - 1)
+    }
+    if hops {
+      // Ears always busy; quick breaths.
+      p.ears = 0.08 * sin(t * 1.7) + (sin(t * 0.9) > 0.95 ? 0.35 : 0)
+      p.lift = 0.006 * sin(t * 5)
+    }
+    let f = moodUntil > moodStarted ? CGFloat((now - moodStarted) / (moodUntil - moodStarted)) : 0
 
     switch mood {
     case .sniff:
@@ -394,11 +458,46 @@ final class PlayScene: SKScene {
       p.head = 0.15 + 0.08 * sin(t * 2.5)
       p.pitch = 0.04
       p.lift = 0.01 * sin(t * 2.5)
+    case .groom:
+      // Washing: head down to a raised paw.
+      p.head = -0.45 + 0.08 * sin(t * 7)
+      p.front = [0.45, 0]
+      p.frontKnee = [-0.9, 0]
+    case .lookout:
+      // Sitting up on the back legs to look around.
+      let k = min(1, min(f, 1 - f) * 5)
+      p.pitch = 0.45 * k
+      p.lift = 0.06 * k
+      p.front = [-0.5 * k, -0.5 * k]
+      p.frontKnee = [0.9 * k, 0.9 * k]
+      p.head = -0.25 * k + 0.1 * sin(t * 1.5)
+      p.ears = 0.15 * k
+    case .binky:
+      // A happy leap with a twist.
+      p.lift = 0.38 * sin(.pi * f)
+      p.pitch = 0.35 * sin(2 * .pi * f)
+      p.back = [-0.6 * sin(.pi * f), -0.6 * sin(.pi * f)]
+      if f > 0.5 && !turnedInAir { facingRight.toggle(); turnedInAir = true }
+    case .pounce:
+      // Crouch, wiggle, leap onto it.
+      if f < 0.55 {
+        p.lift = -0.07
+        p.pitch = -0.1
+        p.tail = 0.1 + 0.25 * sin(t * 20)
+      } else {
+        let g = (f - 0.55) / 0.45
+        p.lift = 0.22 * sin(.pi * g)
+        p.pitch = 0.3 * sin(.pi * g)
+        p.front = [0.8 * sin(.pi * g), 0.8 * sin(.pi * g)]
+      }
+    case .nudge:
+      p.head = -0.4 + 0.05 * sin(t * 12)
+      p.pitch = -0.05
     default:
       break
     }
     // Look toward the finger, the ball or you: a turn of the head.
-    if mood != .sleep && mood != .sniff, let look = lookAt ?? (ballFlying ? screen(ballAt, up: ballHeight) : nil), let head = screen(pos, up: PlayScene.dogMetres * 0.8) {
+    if ![.sleep, .sniff, .groom, .nudge, .binky].contains(mood), let look = lookAt ?? (ballFlying ? screen(ballAt, up: ballHeight) : nil), let head = screen(pos, up: petMetres * 0.8) {
       var angle = atan2(look.y - head.y, abs(look.x - head.x) + 1)
       if (look.x < head.x) == facingRight && abs(look.x - head.x) > 40 { facingRight.toggle() }
       angle = max(-0.35, min(0.45, angle))
@@ -577,7 +676,7 @@ final class PlayScene: SKScene {
       if mood == .sleep { onEvent?("wake") }
       mood = .wander
       let you = place.you()
-      go(to: CGPoint(x: you.x + m(.random(in: -0.5...0.5)), y: you.y - m(0.6)), run: true)
+      go(to: CGPoint(x: you.x + m(.random(in: -0.5...0.5)), y: you.y - m(0.6)), run: !isCat)
       happyUntil = now + 6
       onEvent?("call")
     case "play":
@@ -592,7 +691,7 @@ final class PlayScene: SKScene {
       lookAt = screen(place.you(), up: 1)
       for i in 0..<5 {
         run(.wait(forDuration: Double(i) * 0.25)) { [weak self] in
-          guard let self, let p = self.screen(self.pos, up: PlayScene.dogMetres * 1.05) else { return }
+          guard let self, let p = self.screen(self.pos, up: self.petMetres * 1.05) else { return }
           self.heart(at: p)
         }
       }

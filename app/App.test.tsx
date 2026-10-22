@@ -214,6 +214,8 @@ describe("Playing", () => {
     await fireEvent.press(screen.getByText("Memories"));
     await fireEvent.press(screen.getByText("Choose their photo"));
     expect(await screen.findByText(/Max is in the garden now/)).toBeTruthy();
+    // The skeleton is found the way that suits the species (Vision for cats and dogs, the outline for others).
+    expect(jest.requireMock("./src/play/setup").playFromPhoto).toHaveBeenCalledWith("file:///photos/side.jpg", "dog");
     const saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
     expect(saved.play).toMatchObject({ pet: { uri: "file:///play/pet.png", from: "photo" } });
     await fireEvent.press(screen.getByText("Add a photo of them asleep"));

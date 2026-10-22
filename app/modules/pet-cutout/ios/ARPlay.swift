@@ -99,6 +99,7 @@ final class ARPlayView: ExpoView {
   private var ballUri: String?
   private var commandKey: Int?
   private var running = false
+  var species = "dog"
   private lazy var placing = UITapGestureRecognizer(target: self, action: #selector(place(_:)))
 
   required init(appContext: AppContext? = nil) {
@@ -175,7 +176,7 @@ final class ARPlayView: ExpoView {
     }
     let t = hit.worldTransform.columns.3
     let world = ARWorld(view: arView, floorY: t.y, origin: CGPoint(x: CGFloat(t.x), y: CGFloat(t.z)))
-    let setup = PlayScene.Setup(background: nil, pet: pet, rig: rig, ball: ball, asleep: nil, asleepFacesRight: true, night: false)
+    let setup = PlayScene.Setup(background: nil, pet: pet, rig: rig, ball: ball, asleep: nil, asleepFacesRight: true, night: false, species: species)
     let s = PlayScene(size: bounds.size, setup: setup, world: world)
     s.onEvent = { [weak self] type in self?.onPlayEvent(["type": type]) }
     scene = s

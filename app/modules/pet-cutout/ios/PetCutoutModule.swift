@@ -60,9 +60,9 @@ public class PetCutoutModule: Module {
     }
 
     // Play: the pet's skeleton in its photo, for the real-time puppet.
-    AsyncFunction("petRig") { (cutout: URL) throws -> [String: [Double]] in
+    AsyncFunction("petRig") { (cutout: URL, species: String?) throws -> [String: [Double]] in
       do {
-        return try PetRig.detect(cutout: cutout).mapValues { [$0.x, $0.y, $0.c] }
+        return try PetRig.detect(cutout: cutout, species: species ?? "dog").mapValues { [$0.x, $0.y, $0.c] }
       } catch let e as ClipCutterError {
         throw CutOutException(e.description)
       }
@@ -88,6 +88,9 @@ public class PetCutoutModule: Module {
       Prop("night") { (view: PlayView, night: Bool?) in
         view.night = night ?? false
       }
+      Prop("species") { (view: PlayView, species: String?) in
+        view.species = species ?? "dog"
+      }
       Prop("command") { (view: PlayView, command: [String: Any]?) in
         view.setCommand(command)
       }
@@ -106,6 +109,9 @@ public class PetCutoutModule: Module {
       }
       Prop("command") { (view: ARPlayView, command: [String: Any]?) in
         view.setCommand(command)
+      }
+      Prop("species") { (view: ARPlayView, species: String?) in
+        view.species = species ?? "dog"
       }
     }
 
@@ -451,6 +457,7 @@ final class PlayView: ExpoView {
   var horizon: CGFloat = 0.59
   var cameraMetres: CGFloat = 0.75
   var night = false
+  var species = "dog"
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -507,7 +514,7 @@ final class PlayView: ExpoView {
 
   func refresh() {
     guard let pet, !rig.isEmpty, bounds.width > 0 else { return }
-    let setup = PlayScene.Setup(background: background, pet: pet, rig: rig, ball: ball, asleep: asleep, asleepFacesRight: asleepFacesRight, night: night)
+    let setup = PlayScene.Setup(background: background, pet: pet, rig: rig, ball: ball, asleep: asleep, asleepFacesRight: asleepFacesRight, night: night, species: species)
     if let scene, let world = scene.place as? PhotoWorld, world.horizon == horizon, world.cameraMetres == cameraMetres {
       scene.update(setup: setup)
     } else {

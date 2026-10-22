@@ -55,9 +55,9 @@ export function PlayCard({ pet }: { pet: PetProfile }) {
         <View style={s.row}>
           <Button label={busy ? "Working…" : state.play ? "Use another photo" : "Choose their photo"} kind={state.play ? "soft" : undefined} disabled={busy} onPress={() => run(async () => {
             const uri = await pickOnePhoto();
-            if (uri) use(await playFromPhoto(uri));
+            if (uri) use(await playFromPhoto(uri, pet.species));
           })} />
-          {hasVideo && <Button label="Use their video" kind="soft" disabled={busy} onPress={() => run(async () => use(await playFromClip(state.clips)))} />}
+          {hasVideo && <Button label="Use their video" kind="soft" disabled={busy} onPress={() => run(async () => use(await playFromClip(state.clips, pet.species)))} />}
           {state.play && <Button label="Stop playing" kind="soft" onPress={() => update((st) => ({ ...st, play: undefined }))} />}
         </View>
       )}
@@ -68,7 +68,7 @@ export function PlayCard({ pet }: { pet: PetProfile }) {
             <Button label={busy ? "Working…" : state.play.asleep ? "Use another sleeping photo" : "Add a photo of them asleep"} kind="soft" disabled={busy} onPress={() => run(async () => {
               const uri = await pickOnePhoto();
               if (!uri) return;
-              const asleep = await asleepFromPhoto(uri);
+              const asleep = await asleepFromPhoto(uri, pet.species);
               if (state.play?.asleep) forget(state.play.asleep.uri);
               update((st) => (st.play ? { ...st, play: { ...st.play, asleep } } : st));
               setMessage(`At night ${pet.name} will sleep like that.`);

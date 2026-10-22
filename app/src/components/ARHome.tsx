@@ -14,12 +14,14 @@ const BALL = require("../../assets/garden/ball.png");
  */
 export function ARHome({
   name,
+  species,
   play,
   caption,
   onEvent,
   onClose,
 }: {
   name: string;
+  species: string;
   play: PlayState;
   caption?: string;
   onEvent: (type: string) => void;
@@ -64,6 +66,7 @@ export function ARHome({
               }}
               pet={{ uri: play.pet.uri, rig: play.rig }}
               ball={ball}
+              species={species}
               command={command}
               onPlayEvent={(e) => {
                 const type = e.nativeEvent.type;

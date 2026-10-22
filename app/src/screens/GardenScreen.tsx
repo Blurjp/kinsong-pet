@@ -21,6 +21,8 @@ import {
   type PetProfile,
   type Pose,
   type Reaction,
+  type SoundTag,
+  type Species,
   type Spot,
   type Visit,
 } from "@sinian/core";
@@ -139,24 +141,35 @@ export function GardenScreen({
   };
   const onPlayEvent = (type: string) => {
     const n = pet.name;
+    const sp = pet.species;
+    const cat = sp === "cat";
+    const hopper = sp === "rabbit" || sp === "bird";
     const lines: Record<string, string> = {
       rest: night ? `${n} is resting under the stars.` : `${n} is resting in the ${playScene.title.toLowerCase()}.`,
-      wander: `${n} trots off to explore.`,
-      run: `${n} runs over.`,
-      sniff: `${n} has found an interesting smell.`,
-      bow: `${n} wants to play! Flick the ball.`,
-      petted: `${n} leans into your hand.`,
-      call: `${n} hears you and comes running!`,
-      chase: `${n} races after the ball!`,
+      wander: cat ? `${n} pads off to explore.` : hopper ? `${n} hops off to explore.` : `${n} trots off to explore.`,
+      run: hopper ? `${n} hops over.` : `${n} runs over.`,
+      sniff: hopper ? `${n} nibbles at the grass.` : `${n} has found an interesting smell.`,
+      bow: cat ? `${n} has a long, slow stretch.` : `${n} wants to play! Flick the ball.`,
+      groom: `${n} stops for a wash.`,
+      lookout: `${n} sits up tall to look around.`,
+      binky: `${n} does a happy binky!`,
+      petted: cat ? `${n} purrs and leans into your hand.` : hopper ? `${n} flattens out, perfectly content.` : `${n} leans into your hand.`,
+      call: cat ? `${n} hears you and strolls over, tail up.` : hopper ? `${n} hops over to see you.` : `${n} hears you and comes running!`,
+      chase: cat ? `${n} stalks the ball…` : hopper ? `${n} hops after the ball.` : `${n} races after the ball!`,
+      pounce: `${n} pounces on the ball and bats it away!`,
+      nudge: `${n} noses the ball along.`,
       carry: `${n} has it! Bringing it back…`,
       fetched: `${n} drops the ball at your feet. Again?`,
       sleep: `${n} is asleep. Stroke them to wake them.`,
-      wake: `${n} wakes up, tail already wagging.`,
+      wake: cat ? `${n} wakes up and stretches.` : `${n} wakes up, tail already wagging.`,
       treat: `${n} happily munches the ${lastTreat.current ?? "treat"}.`,
     };
     if (lines[type]) setPlayCaption(lines[type]);
-    if (type === "call" || type === "fetched") sound(["bark", "happy"], true);
-    if (type === "happy" || type === "petted" || type === "treat") sound(pet.species === "cat" ? ["purr", "meow"] : ["happy", "whine"], false);
+    // Their own voice, for this kind of animal.
+    const CALL: Record<Species, SoundTag[]> = { dog: ["bark", "happy"], cat: ["meow"], rabbit: ["happy", "squeak", "other"], bird: ["chirp"], other: ["happy", "other"] };
+    const CONTENT: Record<Species, SoundTag[]> = { dog: ["happy", "whine"], cat: ["purr", "meow"], rabbit: ["happy", "other"], bird: ["chirp"], other: ["happy", "other"] };
+    if (type === "call" || type === "fetched") sound(CALL[sp], sp === "dog");
+    if (type === "happy" || type === "petted" || type === "treat") sound(CONTENT[sp], false);
   };
 
   const [restartKey, setRestartKey] = useState(0);
@@ -247,14 +260,14 @@ export function GardenScreen({
 
       {play ? (
         <>
-          <PlayStage name={pet.name} play={play} scene={playScene} night={night} command={command} onEvent={onPlayEvent} />
+          <PlayStage name={pet.name} species={pet.species} play={play} scene={playScene} night={night} command={command} onEvent={onPlayEvent} />
           <View style={[s.row, { marginTop: 8 }]}>
             {SCENES.map((sc) => (
               <Chip key={sc.id} label={sc.title} on={sc.id === playScene.id} onPress={() => update((st) => (st.play ? { ...st, play: { ...st.play, scene: sc.id } } : st))} />
             ))}
             {ARPlayView && <Chip label={`📷 ${pet.name} at home`} on={false} onPress={() => setAtHome(true)} />}
           </View>
-          {atHome && <ARHome name={pet.name} play={play} caption={playCaption} onEvent={onPlayEvent} onClose={() => setAtHome(false)} />}
+          {atHome && <ARHome name={pet.name} species={pet.species} play={play} caption={playCaption} onEvent={onPlayEvent} onClose={() => setAtHome(false)} />}
         </>
       ) : alive && aliveScene && aliveState ? (
         <AliveStage
