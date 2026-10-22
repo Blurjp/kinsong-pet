@@ -40,6 +40,8 @@ interface PetCutoutNative {
   composeKeyframe(pet: string, scene: string, out: string, feetX: number, feetY: number, height: number): Promise<string>;
   /** A clip's last frame as a JPEG. */
   lastFrame(video: string, out: string): Promise<string>;
+  /** The pet's skeleton in a cut-out photo: joint name → [x, y, confidence], fractions from the top left. */
+  petRig(cutout: string): Promise<Record<string, number[]>>;
   /** Share the widget's picture (pet cut-out on its place) and remembrance days with the home-screen widget. */
   updateWidget(info: WidgetInfo, background: string | null, pet: string | null, closeUp: boolean): Promise<void>;
 }
@@ -70,3 +72,19 @@ export const PetClipView: ComponentType<PetClipViewProps> | undefined = PetCutou
 
 /** The brought-to-life player; undefined wherever PetCutout is. */
 export const AliveView: ComponentType<AliveViewProps> | undefined = PetCutout ? requireNativeViewManager<AliveViewProps>("PetCutout", "AliveView") : undefined;
+
+export interface PlayViewProps extends ViewProps {
+  /** The pet cut out of a photo, and its skeleton from petRig. */
+  pet?: { uri: string; rig: Record<string, number[]>; asleep?: { uri: string; facesRight: boolean } };
+  background?: string;
+  ball?: string;
+  horizon?: number;
+  cameraMetres?: number;
+  night?: boolean;
+  /** A new `key` sends the command. */
+  command?: { kind: "call" | "play" | "pet" | "treat"; key: number };
+  onPlayEvent?: (e: { nativeEvent: { type: string } }) => void;
+}
+
+/** The real-time play scene; undefined wherever PetCutout is. */
+export const PlayView: ComponentType<PlayViewProps> | undefined = PetCutout ? requireNativeViewManager<PlayViewProps>("PetCutout", "PlayView") : undefined;

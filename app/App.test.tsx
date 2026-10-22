@@ -9,6 +9,7 @@ jest.mock("./src/media", () => ({
   pickPhotos: jest.fn(async () => ["file:///photos/max-1.jpg"]),
   pickRecording: jest.fn(async () => "file:///sounds/bark.m4a"),
   pickPlacePhoto: jest.fn(async () => "file:///places/backyard.jpg"),
+  pickOnePhoto: jest.fn(async () => "file:///photos/side.jpg"),
   importVideoClip: jest.fn(async () => ({
     dir: "file:///clips/new/",
     videoUri: "file:///clips/new/clip.mov",
@@ -39,6 +40,13 @@ const barkClip = {
   facing: "right" as const,
   audioUri: "file:///clips/c1/sound.m4a",
 };
+
+jest.mock("./src/play/setup", () => ({
+  playFromPhoto: jest.fn(async () => ({ pet: { uri: "file:///play/pet.png", width: 600, height: 400, from: "photo" }, rig: { nose: [0.9, 0.3, 0.8] } })),
+  playFromClip: jest.fn(async () => undefined),
+  asleepFromPhoto: jest.fn(async () => ({ uri: "file:///play/asleep.png", width: 700, height: 300, facesRight: false })),
+}));
+jest.mock("./modules/pet-cutout", () => ({ PetCutout: {}, PlayView: undefined, AliveView: undefined, PetClipView: undefined }));
 
 const played = media.play as jest.Mock;
 const t = today();
@@ -195,6 +203,35 @@ describe("Kinsong Pets", () => {
     expect(screen.getByText(/Imagined postcard/)).toBeTruthy();
     await fireEvent.press(screen.getByText("We did this for Max in real life"));
     expect(screen.getByText(`You did this for Max on ${t}.`)).toBeTruthy();
+  });
+});
+
+describe("Playing", () => {
+  const playing = { pet: { uri: "file:///play/pet.png", width: 600, height: 400, from: "photo" as const }, rig: { nose: [0.9, 0.3, 0.8] } };
+
+  it("makes them into a puppet from one photo, and the garden becomes somewhere to play", async () => {
+    await render(<PetsApp initial={seeded()} />);
+    await fireEvent.press(screen.getByText("Memories"));
+    await fireEvent.press(screen.getByText("Choose their photo"));
+    expect(await screen.findByText(/Max is in the garden now/)).toBeTruthy();
+    const saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.play).toMatchObject({ pet: { uri: "file:///play/pet.png", from: "photo" } });
+    await fireEvent.press(screen.getByText("Add a photo of them asleep"));
+    expect(await screen.findByText(/At night Max will sleep like that/)).toBeTruthy();
+    const withSleep = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(withSleep.play?.asleep).toEqual({ uri: "file:///play/asleep.png", width: 700, height: 300, facesRight: false });
+    await fireEvent.press(screen.getByText("Garden"));
+    expect(screen.getByText(/flick the ball to throw it/)).toBeTruthy();
+    expect(screen.getByText(/moving as a puppet on your phone. Imagined, not filmed/)).toBeTruthy();
+  });
+
+  it("plays in any of the scenes", async () => {
+    await render(<PetsApp initial={seeded({ play: playing })} />);
+    expect(screen.getByLabelText("Max in the summer meadow")).toBeTruthy();
+    await fireEvent.press(screen.getByText("Beach at sunset"));
+    expect(screen.getByLabelText("Max in the beach at sunset")).toBeTruthy();
+    const saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.play?.scene).toBe("beach");
   });
 });
 

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import ExpoModulesCore
+import SpriteKit
 import ImageIO
 import UniformTypeIdentifiers
 import WidgetKit
@@ -55,6 +56,43 @@ public class PetCutoutModule: Module {
         return try await Keyframe.lastFrame(of: video, to: out).absoluteString
       } catch let e as ClipCutterError {
         throw CutOutException(e.description)
+      }
+    }
+
+    // Play: the pet's skeleton in its photo, for the real-time puppet.
+    AsyncFunction("petRig") { (cutout: URL) throws -> [String: [Double]] in
+      do {
+        return try PetRig.detect(cutout: cutout).mapValues { [$0.x, $0.y, $0.c] }
+      } catch let e as ClipCutterError {
+        throw CutOutException(e.description)
+      }
+    }
+
+    View(PlayView.self) {
+      Events("onPlayEvent")
+      Prop("pet") { (view: PlayView, pet: [String: Any]?) in
+        view.setPet(pet)
+      }
+      Prop("background") { (view: PlayView, uri: String?) in
+        view.setBackground(uri)
+      }
+      Prop("ball") { (view: PlayView, uri: String?) in
+        view.setBall(uri)
+      }
+      Prop("horizon") { (view: PlayView, horizon: Double?) in
+        view.horizon = CGFloat(horizon ?? 0.59)
+      }
+      Prop("cameraMetres") { (view: PlayView, metres: Double?) in
+        view.cameraMetres = CGFloat(metres ?? 0.75)
+      }
+      Prop("night") { (view: PlayView, night: Bool?) in
+        view.night = night ?? false
+      }
+      Prop("command") { (view: PlayView, command: [String: Any]?) in
+        view.setCommand(command)
+      }
+      OnViewDidUpdateProps { (view: PlayView) in
+        view.refresh()
       }
     }
 
@@ -378,5 +416,98 @@ enum Moonlight {
         "inputGVector": CIVector(x: 0, y: 0.2, z: 0, w: 0),
         "inputBVector": CIVector(x: 0, y: 0, z: 0.4, w: 0),
       ])
+  }
+}
+
+/** Hosts the real-time play scene in the app. */
+final class PlayView: ExpoView {
+  let onPlayEvent = EventDispatcher()
+  private let skView = SKView()
+  private var scene: PlayScene?
+  private var pet: CGImage?
+  private var rig: [String: CGPoint] = [:]
+  private var asleep: CGImage?
+  private var asleepUri: String?
+  private var asleepFacesRight = true
+  private var background: CGImage?
+  private var ball: CGImage?
+  private var petUri: String?
+  private var backgroundUri: String?
+  private var ballUri: String?
+  private var commandKey: Int?
+  var horizon: CGFloat = 0.59
+  var cameraMetres: CGFloat = 0.75
+  var night = false
+
+  required init(appContext: AppContext? = nil) {
+    super.init(appContext: appContext)
+    clipsToBounds = true
+    skView.ignoresSiblingOrder = true
+    skView.preferredFramesPerSecond = 60
+    addSubview(skView)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    skView.frame = bounds
+    refresh()
+  }
+
+  func setPet(_ value: [String: Any]?) {
+    guard let value else { return }
+    let asleepValue = value["asleep"] as? [String: Any]
+    let nextAsleep = asleepValue?["uri"] as? String
+    if nextAsleep != asleepUri {
+      asleepUri = nextAsleep
+      asleep = nextAsleep.flatMap(PlayView.load)
+      asleepFacesRight = (asleepValue?["facesRight"] as? Bool) ?? true
+    }
+    guard let uri = value["uri"] as? String, uri != petUri else { return }
+    petUri = uri
+    pet = PlayView.load(uri)
+    rig = [:]
+    for (k, v) in (value["rig"] as? [String: [Double]]) ?? [:] where v.count >= 2 {
+      rig[k] = CGPoint(x: v[0], y: v[1])
+    }
+  }
+
+  func setBackground(_ uri: String?) {
+    guard uri != backgroundUri else { return }
+    backgroundUri = uri
+    background = uri.flatMap(PlayView.load)
+  }
+
+  func setBall(_ uri: String?) {
+    guard uri != ballUri else { return }
+    ballUri = uri
+    ball = uri.flatMap(PlayView.load)
+  }
+
+  /** { kind, key }: a new key sends the command (call, play, pet, treat). */
+  func setCommand(_ command: [String: Any]?) {
+    guard let command, let kind = command["kind"] as? String else { return }
+    let key = (command["key"] as? Int) ?? 0
+    guard key != commandKey else { return }
+    commandKey = key
+    scene?.command(kind)
+  }
+
+  func refresh() {
+    guard let pet, !rig.isEmpty, bounds.width > 0 else { return }
+    let setup = PlayScene.Setup(background: background, pet: pet, rig: rig, ball: ball, asleep: asleep, asleepFacesRight: asleepFacesRight, horizon: horizon, cameraMetres: cameraMetres, night: night)
+    if let scene {
+      scene.update(setup: setup)
+    } else {
+      let s = PlayScene(size: bounds.size, setup: setup)
+      s.onEvent = { [weak self] type in self?.onPlayEvent(["type": type]) }
+      scene = s
+      skView.presentScene(s)
+      s.announce()
+    }
+  }
+
+  private static func load(_ uri: String) -> CGImage? {
+    guard let url = URL(string: uri), let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(src, 0, nil)
   }
 }

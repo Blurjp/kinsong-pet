@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { relocateState } from "./paths";
 import type { AliveState } from "../alive/types";
+import type { PlayState } from "../play/setup";
 import type { PetPhoto, PetProfile, SoundClip, VideoClip, Visit } from "@sinian/core";
 
 /** Everything stays on the device. One pet per install for the prototype. */
@@ -22,6 +23,8 @@ export interface PetState {
   remindersOn?: boolean;
   /** The pet brought to life in photographed scenes by a video model, with the family's agreement. */
   alive?: AliveState;
+  /** The pet as a real-time puppet made from their photo, to play with. */
+  play?: PlayState;
 }
 
 const KEY = "kinsong-pets/v1";

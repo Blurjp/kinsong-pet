@@ -27,11 +27,12 @@ import {
 import { newId, today, useStore } from "../state/store";
 import { GardenScene, walkMs } from "../components/GardenScene";
 import { AliveStage } from "../components/AliveStage";
-import { sceneById } from "../alive/scenes";
+import { SCENES, sceneById } from "../alive/scenes";
+import { PlayStage, type PlayCommand } from "../components/PlayStage";
 import { sceneProgress, type AliveAction } from "../alive/types";
 import { useAlivePet } from "../alive/useAlivePet";
 import { PhotoViewer } from "../components/PhotoViewer";
-import { play } from "../media";
+import { play as play_ } from "../media";
 import { Button, Card, Chip, Field, Note, colors, s } from "../ui";
 
 const FLOWER_LABEL: Record<FlowerKind, string> = {
@@ -120,6 +121,41 @@ export function GardenScreen({
     autoplay,
   });
 
+  // Play: the pet as a real-time puppet from their photo. When it's set up, it's the garden.
+  const play = state.play;
+  const playScene = sceneById(play?.scene) ?? SCENES[0]!;
+  const [command, setCommand] = useState<PlayCommand>();
+  const commandKey = useRef(0);
+  const lastTreat = useRef<string | undefined>(undefined);
+  const [playCaption, setPlayCaption] = useState<string>();
+  const sound = (prefer: Parameters<typeof pickSound>[1], bark: boolean) => {
+    if (!state.soundOn) return;
+    const own = bark ? state.clips.find((c) => c.action === "bark" && c.audioUri)?.audioUri : undefined;
+    const uri = own ?? pickSound(state.sounds, prefer, nextSeed())?.uri;
+    if (uri) play_(uri);
+  };
+  const onPlayEvent = (type: string) => {
+    const n = pet.name;
+    const lines: Record<string, string> = {
+      rest: night ? `${n} is resting under the stars.` : `${n} is resting in the ${playScene.title.toLowerCase()}.`,
+      wander: `${n} trots off to explore.`,
+      run: `${n} runs over.`,
+      sniff: `${n} has found an interesting smell.`,
+      bow: `${n} wants to play! Flick the ball.`,
+      petted: `${n} leans into your hand.`,
+      call: `${n} hears you and comes running!`,
+      chase: `${n} races after the ball!`,
+      carry: `${n} has it! Bringing it back…`,
+      fetched: `${n} drops the ball at your feet. Again?`,
+      sleep: `${n} is asleep. Stroke them to wake them.`,
+      wake: `${n} wakes up, tail already wagging.`,
+      treat: `${n} happily munches the ${lastTreat.current ?? "treat"}.`,
+    };
+    if (lines[type]) setPlayCaption(lines[type]);
+    if (type === "call" || type === "fetched") sound(["bark", "happy"], true);
+    if (type === "happy" || type === "petted" || type === "treat") sound(pet.species === "cat" ? ["purr", "meow"] : ["happy", "whine"], false);
+  };
+
   const [restartKey, setRestartKey] = useState(0);
   const [holdUntil, setHoldUntil] = useState(0); // pause the life loop while a reaction plays out
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -156,19 +192,24 @@ export function GardenScreen({
     const shown = pickVideoClip(state.clips, r.clips, seed);
     const recording = pickSound(state.sounds, r.sounds, nextSeed());
     const uri = shown?.action === "bark" && shown.audioUri ? shown.audioUri : (recording?.uri ?? shown?.audioUri);
-    if (uri) play(uri);
+    if (uri) play_(uri);
   };
 
   const respond = useCallback(
     (i: Interaction, treat?: string) => {
       const r = react(i, { name: pet.name, species: pet.species, here: live.at, toy, treat });
+      if (play) {
+        lastTreat.current = treat;
+        setCommand({ kind: i, key: ++commandKey.current });
+        return;
+      }
       if (alive) {
         const ALIVE: Record<Interaction, AliveAction> = { pet: "happy", call: "bark", play: "play", treat: "eat" };
         if (!alivePet.run(ALIVE[i]) || !state.soundOn) return;
         // Their real voice: a bark from their own video if there is one, otherwise their recordings.
         const bark = i === "call" ? state.clips.find((c) => c.action === "bark" && c.audioUri)?.audioUri : undefined;
         const uri = bark ?? pickSound(state.sounds, r.sounds, nextSeed())?.uri;
-        if (uri) play(uri);
+        if (uri) play_(uri);
         return;
       }
       const at = place(r.at);
@@ -182,7 +223,7 @@ export function GardenScreen({
     },
     // nextSeed only touches a ref; place, walkTime and perform only read what's listed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips, alive, alivePet],
+    [pet.name, pet.species, live.at, toy, state.soundOn, state.sounds, state.clips, alive, alivePet, play],
   );
 
   // Every gesture is free and leaves something that stays.
@@ -201,7 +242,16 @@ export function GardenScreen({
         </View>
       )}
 
-      {alive && aliveScene && aliveState ? (
+      {play ? (
+        <>
+          <PlayStage name={pet.name} play={play} scene={playScene} night={night} command={command} onEvent={onPlayEvent} />
+          <View style={[s.row, { marginTop: 8 }]}>
+            {SCENES.map((sc) => (
+              <Chip key={sc.id} label={sc.title} on={sc.id === playScene.id} onPress={() => update((st) => (st.play ? { ...st, play: { ...st.play, scene: sc.id } } : st))} />
+            ))}
+          </View>
+        </>
+      ) : alive && aliveScene && aliveState ? (
         <AliveStage
           name={pet.name}
           scene={aliveScene}
@@ -242,10 +292,13 @@ export function GardenScreen({
         </View>
       )}
       <Text style={{ color: colors.ink, fontSize: 15, marginTop: 8, minHeight: 40 }} accessibilityLiveRegion="polite">
-        {alive ? alivePet.caption : caption}
+        {play ? (playCaption ?? `${pet.name} is here with you.`) : alive ? alivePet.caption : caption}
       </Text>
+      {play && <Text style={{ color: colors.muted, fontSize: 13, marginBottom: 2 }}>Stroke {pet.name} · tap the ground to call them over · flick the ball to throw it</Text>}
       <Text style={{ color: colors.muted, fontSize: 12 }}>
-        {alive ? (
+        {play ? (
+          <>✦ {pet.name}, from your {play.pet.from}, moving as a puppet on your phone. Imagined, not filmed.</>
+        ) : alive ? (
           <>
             ✦ Brought to life by AI from your {state.alive?.pet?.from === "video" ? "video" : "photo"} of {pet.name}. Imagined, not filmed
             {state.sounds.length || state.clips.some((c) => c.audioUri) ? "; the voice is their own" : ""}.
