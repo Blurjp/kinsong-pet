@@ -88,3 +88,14 @@ export interface PlayViewProps extends ViewProps {
 
 /** The real-time play scene; undefined wherever PetCutout is. */
 export const PlayView: ComponentType<PlayViewProps> | undefined = PetCutout ? requireNativeViewManager<PlayViewProps>("PetCutout", "PlayView") : undefined;
+
+export interface ARPlayViewProps extends ViewProps {
+  pet?: { uri: string; rig: Record<string, number[]> };
+  ball?: string;
+  command?: { kind: "call" | "play" | "pet" | "treat"; key: number };
+  /** Play events, plus "ar-unsupported", "ar-find-floor" and "ar-placed". */
+  onPlayEvent?: (e: { nativeEvent: { type: string } }) => void;
+}
+
+/** The pet in your home through the camera; undefined wherever PetCutout is. */
+export const ARPlayView: ComponentType<ARPlayViewProps> | undefined = PetCutout ? requireNativeViewManager<ARPlayViewProps>("PetCutout", "ARPlayView") : undefined;

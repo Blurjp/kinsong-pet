@@ -1,14 +1,81 @@
 import SpriteKit
 
 /**
- A real-time place to be with the pet: their photo-puppet stands on a
- photographed scene, in its perspective, and lives there. It rests, looks
- round, wanders off to sniff, invites you to play, runs to where you tap,
- comes when called, leans into your finger when you stroke it, and chases the
- ball you throw and brings it back. At night it sleeps until you wake it.
+ Where the pet plays: how its ground maps onto the screen. A photographed
+ scene (PhotoWorld) or your own floor seen through the camera (ARWorld).
+ Ground points are (x, y) in the world's own units; `unitsPerMetre` says how
+ many of them make a metre.
+ */
+protocol PlayWorld: AnyObject {
+  var unitsPerMetre: CGFloat { get }
+  /** Where a ground point, `up` metres above the ground, appears in the scene (origin bottom left); nil if out of sight. */
+  func screen(_ ground: CGPoint, up: CGFloat, size: CGSize) -> CGPoint?
+  /** The ground point under a point on screen, if there is ground there. */
+  func ground(at point: CGPoint, size: CGSize) -> CGPoint?
+  /** Where you are: the spot just in front of the camera. */
+  func you() -> CGPoint
+  func clamp(_ ground: CGPoint) -> CGPoint
+  func randomSpot() -> CGPoint
+  /** Where the pet starts out. */
+  func start() -> CGPoint
+  /** A flick on screen as a throw: ground velocity (units/s) and upward speed (m/s). */
+  func throwVelocity(_ swipe: CGVector, size: CGSize) -> (x: CGFloat, y: CGFloat, up: CGFloat)
+  /** Nearer things are drawn over further ones. */
+  func drawOrder(_ ground: CGPoint) -> CGFloat
+}
 
- Positions on the ground are (x, depth): x 0 left → 1 right, depth 0 far → 1
- near, a little past 1 is right in front of you.
+/**
+ A photographed scene: ground is (x, depth), x 0 left → 1 right, depth 0 far
+ → 1 near (a little past 1 is right in front of you), on the photo's own
+ perspective (its horizon, and the camera height that makes a pet its size).
+ */
+final class PhotoWorld: PlayWorld {
+  let horizon: CGFloat
+  let cameraMetres: CGFloat
+  /** About seven metres across the near ground. */
+  let unitsPerMetre: CGFloat = 0.137
+
+  init(horizon: CGFloat, cameraMetres: CGFloat) {
+    self.horizon = horizon
+    self.cameraMetres = cameraMetres
+  }
+
+  /** Fraction from the top where ground at this depth appears; matches the garden's photo geometry. */
+  private func fraction(_ depth: CGFloat) -> CGFloat {
+    horizon + (1 - horizon) * (0.2227 + depth * (0.8118 - 0.2227))
+  }
+
+  func screen(_ g: CGPoint, up: CGFloat, size: CGSize) -> CGPoint? {
+    let f = fraction(g.y)
+    let perMetre = max(0, f - horizon) * size.height / cameraMetres
+    return CGPoint(x: g.x * size.width, y: size.height * (1 - f) + up * perMetre)
+  }
+
+  func ground(at p: CGPoint, size: CGSize) -> CGPoint? {
+    let f = 1 - p.y / size.height
+    guard f > horizon + 0.01 else { return nil }
+    let depth = ((f - horizon) / (1 - horizon) - 0.2227) / (0.8118 - 0.2227)
+    return CGPoint(x: p.x / size.width, y: min(1.1, max(0, depth)))
+  }
+
+  func you() -> CGPoint { CGPoint(x: 0.5, y: 1.1) }
+  func clamp(_ g: CGPoint) -> CGPoint { CGPoint(x: min(0.95, max(0.05, g.x)), y: min(1.08, max(0.02, g.y))) }
+  func randomSpot() -> CGPoint { CGPoint(x: .random(in: 0.15...0.85), y: .random(in: 0.2...0.85)) }
+  func start() -> CGPoint { CGPoint(x: 0.5, y: 0.55) }
+
+  func throwVelocity(_ v: CGVector, size: CGSize) -> (x: CGFloat, y: CGFloat, up: CGFloat) {
+    (x: v.dx / size.width * 0.55, y: -v.dy / size.height * 0.9, up: min(6, 1.5 + hypot(v.dx, v.dy) / 600))
+  }
+
+  func drawOrder(_ g: CGPoint) -> CGFloat { g.y * 100 }
+}
+
+/**
+ A real-time place to be with the pet: their photo-puppet stands in a
+ PlayWorld, in its perspective, and lives there. It rests, looks round,
+ wanders off to sniff, invites you to play, runs to where you tap, comes when
+ called, leans into your finger when you stroke it, and chases the ball you
+ throw and brings it back. At night it sleeps until you wake it.
  */
 final class PlayScene: SKScene {
   struct Setup {
@@ -20,10 +87,6 @@ final class PlayScene: SKScene {
     var asleep: CGImage?
     /** Which way the asleep photo faces; mirrored to match the puppet. */
     var asleepFacesRight: Bool
-    /** Where the ground meets the distance, 0 top → 1 bottom. */
-    var horizon: CGFloat
-    /** Camera height in metres; with the pet's size, how big things look. */
-    var cameraMetres: CGFloat
     var night: Bool
   }
 
@@ -33,6 +96,7 @@ final class PlayScene: SKScene {
   var onEvent: ((String) -> Void)?
 
   private var setup: Setup
+  let place: PlayWorld
   private let world = SKNode()
   private var puppet: Puppet?
   private let petNode = SKNode()
@@ -45,7 +109,7 @@ final class PlayScene: SKScene {
   private let night = SKSpriteNode(color: UIColor(red: 0.42, green: 0.48, blue: 0.66, alpha: 1), size: .zero)
   private var background: SKSpriteNode?
 
-  private var pos = CGPoint(x: 0.5, y: 0.55)
+  private var pos: CGPoint
   private var target: CGPoint?
   private var running = false
   private var facingRight = true
@@ -60,7 +124,7 @@ final class PlayScene: SKScene {
   private var pose = Puppet.Pose()
 
   // The ball: on the ground at (x, depth), `height` metres up.
-  private var ballAt = CGPoint(x: 0.64, y: 1.08)
+  private var ballAt: CGPoint
   private var ballHeight: CGFloat = 0
   private var ballVelocity = (x: CGFloat(0), depth: CGFloat(0), up: CGFloat(0))
   private var ballFlying = false
@@ -71,14 +135,18 @@ final class PlayScene: SKScene {
   private var lastPurr: TimeInterval = 0
   private var touchStart: CGPoint?
 
-  static let you = CGPoint(x: 0.5, y: 1.1)
   private static let dogMetres: CGFloat = 0.6
+  /** Ground units for a distance in metres, in this world. */
+  private func m(_ metres: CGFloat) -> CGFloat { metres * place.unitsPerMetre }
 
-  init(size: CGSize, setup: Setup) {
+  init(size: CGSize, setup: Setup, world place: PlayWorld) {
     self.setup = setup
+    self.place = place
+    pos = place.start()
+    ballAt = place.clamp(CGPoint(x: place.you().x + 0.4 * place.unitsPerMetre, y: place.you().y - 0.1 * place.unitsPerMetre))
     super.init(size: size)
     scaleMode = .resizeFill
-    backgroundColor = .black
+    backgroundColor = setup.background == nil ? .clear : .black
     addChild(world)
     build()
   }
@@ -149,30 +217,16 @@ final class PlayScene: SKScene {
 
   // MARK: - Ground and perspective
 
-  /** Fraction from the top where ground at this depth appears; matches the garden's photo geometry. */
-  private func groundFraction(_ depth: CGFloat) -> CGFloat {
-    let h = setup.horizon
-    return h + (1 - h) * (0.2227 + depth * (0.8118 - 0.2227))
+  private func screen(_ g: CGPoint, up metres: CGFloat = 0) -> CGPoint? {
+    place.screen(g, up: metres, size: size)
   }
 
-  private func screen(_ ground: CGPoint, up metres: CGFloat = 0) -> CGPoint {
-    let f = groundFraction(ground.y)
-    return CGPoint(x: ground.x * size.width, y: size.height * (1 - f) + metres * pointsPerMetre(ground.y))
+  private func pointsPerMetre(_ g: CGPoint) -> CGFloat {
+    guard let a = screen(g), let b = screen(g, up: 1) else { return 0 }
+    return abs(b.y - a.y)
   }
 
-  private func pointsPerMetre(_ depth: CGFloat) -> CGFloat {
-    max(0, groundFraction(depth) - setup.horizon) * size.height / setup.cameraMetres
-  }
-
-  /** The ground point under a screen point, if it's on the ground. */
-  private func ground(at p: CGPoint) -> CGPoint? {
-    let f = 1 - p.y / size.height
-    let depth = ((f - setup.horizon) / (1 - setup.horizon) - 0.2227) / (0.8118 - 0.2227)
-    guard f > setup.horizon + 0.01 else { return nil }
-    return CGPoint(x: p.x / size.width, y: min(1.1, max(0, depth)))
-  }
-
-  private var petHeight: CGFloat { PlayScene.dogMetres * pointsPerMetre(pos.y) }
+  private var petHeight: CGFloat { PlayScene.dogMetres * pointsPerMetre(pos) }
 
   // MARK: - Life
 
@@ -189,11 +243,18 @@ final class PlayScene: SKScene {
     puppet.apply(pose)
 
     let h = petHeight
-    petNode.position = screen(pos)
+    guard let feet = screen(pos), h > 1 else {
+      petNode.isHidden = true
+      shadow.isHidden = true
+      return
+    }
+    petNode.isHidden = false
+    shadow.isHidden = false
+    petNode.position = feet
     petNode.xScale = (facingRight ? 1 : -1) * h
     petNode.yScale = h
     puppet.position = CGPoint(x: -puppet.aspect / 2, y: -puppet.groundY)
-    petNode.zPosition = pos.y * 100
+    petNode.zPosition = place.drawOrder(pos)
     shadow.position = petNode.position
     shadow.size = CGSize(width: h * puppet.aspect * 0.85, height: h * 0.12)
     shadow.zPosition = petNode.zPosition - 0.5
@@ -214,19 +275,19 @@ final class PlayScene: SKScene {
     nextIdea = now + Double.random(in: 5...11)
     switch Double.random(in: 0...1) {
     case ..<0.4:
-      go(to: CGPoint(x: .random(in: 0.15...0.85), y: .random(in: 0.2...0.85)), run: false)
+      go(to: place.randomSpot(), run: false)
       mood = .wander; onEvent?("wander")
     case ..<0.65:
       mood = .sniff; moodUntil = now + 3.5; onEvent?("sniff")
     case ..<0.8:
       mood = .bow; moodUntil = now + 2.2; happyUntil = now + 3; onEvent?("bow")
     default:
-      lookAt = screen(PlayScene.you)
+      lookAt = screen(place.you(), up: 1)
     }
   }
 
   private func go(to point: CGPoint, run: Bool) {
-    target = CGPoint(x: min(0.95, max(0.05, point.x)), y: min(1.08, max(0, point.y)))
+    target = place.clamp(point)
     running = run
   }
 
@@ -234,8 +295,8 @@ final class PlayScene: SKScene {
     guard let t = target else { return }
     let dx = t.x - pos.x, dy = t.y - pos.y
     let dist = hypot(dx, dy)
-    let speed: CGFloat = running ? 0.34 : 0.11
-    if dist < 0.01 {
+    let speed = m(running ? 2.5 : 0.8)
+    if dist < m(0.07) {
       target = nil
       arrived()
       return
@@ -243,29 +304,32 @@ final class PlayScene: SKScene {
     let step = min(dist, speed * dt)
     pos.x += dx / dist * step
     pos.y += dy / dist * step
-    if abs(dx) > 0.004 { facingRight = dx > 0 }
+    // Face the way it's going, as seen on screen.
+    if let a = screen(pos), let b = screen(t), abs(b.x - a.x) > 2 { facingRight = b.x > a.x }
     phase += dt * (running ? 13 : 7.5)
   }
 
   private func arrived() {
     switch mood {
     case .chase:
-      if !ballFlying && hypot(ballAt.x - pos.x, ballAt.y - pos.y) < 0.06 {
+      if !ballFlying && hypot(ballAt.x - pos.x, ballAt.y - pos.y) < m(0.45) {
         ballCarried = true
         mood = .carry
-        go(to: CGPoint(x: PlayScene.you.x - 0.05, y: 1.02), run: true)
+        let you = place.you()
+        go(to: CGPoint(x: you.x - m(0.35), y: you.y - m(0.4)), run: true)
         onEvent?("carry")
       } else {
         go(to: ballAt, run: true)
       }
     case .carry:
       ballCarried = false
-      ballAt = CGPoint(x: pos.x + (facingRight ? 0.06 : -0.06), y: min(1.08, pos.y + 0.04))
+      let you = place.you()
+      ballAt = place.clamp(CGPoint(x: pos.x + (you.x - pos.x) * 0.4, y: pos.y + (you.y - pos.y) * 0.4))
       ballHeight = 0
       mood = .rest
       happyUntil = now + 5
       moodUntil = now + 5
-      lookAt = screen(PlayScene.you, up: 1.2)
+      lookAt = screen(you, up: 1.2)
       onEvent?("fetched")
     default:
       if mood == .wander { mood = .rest }
@@ -334,8 +398,7 @@ final class PlayScene: SKScene {
       break
     }
     // Look toward the finger, the ball or you: a turn of the head.
-    if mood != .sleep && mood != .sniff, let look = lookAt ?? (ballFlying ? screen(ballAt, up: ballHeight) : nil) {
-      let head = screen(pos, up: PlayScene.dogMetres * 0.8)
+    if mood != .sleep && mood != .sniff, let look = lookAt ?? (ballFlying ? screen(ballAt, up: ballHeight) : nil), let head = screen(pos, up: PlayScene.dogMetres * 0.8) {
       var angle = atan2(look.y - head.y, abs(look.x - head.x) + 1)
       if (look.x < head.x) == facingRight && abs(look.x - head.x) > 40 { facingRight.toggle() }
       angle = max(-0.35, min(0.45, angle))
@@ -372,8 +435,11 @@ final class PlayScene: SKScene {
     ballHeight += ballVelocity.up * dt
     ballAt.x += ballVelocity.x * dt
     ballAt.y += ballVelocity.depth * dt
-    if ballAt.x < 0.03 || ballAt.x > 0.97 { ballVelocity.x *= -0.6; ballAt.x = min(0.97, max(0.03, ballAt.x)) }
-    if ballAt.y < 0.02 { ballVelocity.depth *= -0.5; ballAt.y = 0.02 }
+    // Bounce off the edges of where the pet can go.
+    let inside = place.clamp(ballAt)
+    if inside.x != ballAt.x { ballVelocity.x *= -0.6 }
+    if inside.y != ballAt.y { ballVelocity.depth *= -0.5 }
+    ballAt = inside
     if ballHeight <= 0 {
       ballHeight = 0
       if abs(ballVelocity.up) > 1.2 {
@@ -384,7 +450,7 @@ final class PlayScene: SKScene {
         ballVelocity.up = 0
         ballVelocity.x *= max(0, 1 - 3 * dt) // rolling to a stop in the grass
         ballVelocity.depth *= max(0, 1 - 3 * dt)
-        if hypot(ballVelocity.x, ballVelocity.depth) < 0.01 { ballFlying = false }
+        if hypot(ballVelocity.x, ballVelocity.depth) < m(0.07) { ballFlying = false }
       }
     }
     if mood == .chase { target = ballAt; running = true }
@@ -392,7 +458,7 @@ final class PlayScene: SKScene {
 
   private func placeBall() {
     guard let puppet else { return }
-    let size = 0.075 * pointsPerMetre(ballCarried ? pos.y : ballAt.y)
+    let size = 0.075 * pointsPerMetre(ballCarried ? pos : ballAt)
     ball.size = CGSize(width: size, height: size)
     if ballCarried {
       let m = puppet.headPoint(puppet.mouth, pose: pose, scaleX: 1)
@@ -402,10 +468,15 @@ final class PlayScene: SKScene {
       ballShadow.isHidden = true
       return
     }
+    guard let ground = screen(ballAt) else {
+      ball.isHidden = true
+      ballShadow.isHidden = true
+      return
+    }
+    ball.isHidden = false
     ballShadow.isHidden = false
-    let ground = screen(ballAt)
-    ball.position = CGPoint(x: ground.x, y: ground.y + ballHeight * pointsPerMetre(ballAt.y) + size / 2)
-    ball.zPosition = ballAt.y * 100 + 0.2
+    ball.position = CGPoint(x: ground.x, y: ground.y + ballHeight * pointsPerMetre(ballAt) + size / 2)
+    ball.zPosition = place.drawOrder(ballAt) + 0.2
     ballShadow.position = ground
     ballShadow.size = CGSize(width: size * 1.1 / (1 + ballHeight), height: size * 0.3 / (1 + ballHeight))
     ballShadow.zPosition = ball.zPosition - 0.1
@@ -416,7 +487,8 @@ final class PlayScene: SKScene {
     guard speed > 150 else { return }
     ballFlying = true
     ballHeight = 0.3
-    ballVelocity = (x: v.dx / size.width * 0.55, depth: -v.dy / size.height * 0.9, up: min(6, 1.5 + speed / 600))
+    let throwing = place.throwVelocity(v, size: size)
+    ballVelocity = (x: throwing.x, depth: throwing.y, up: throwing.up)
     mood = .chase
     happyUntil = now + 8
     lookAt = nil
@@ -457,7 +529,7 @@ final class PlayScene: SKScene {
       d.last = p
       d.lastTime = now
       dragging = d
-      if let g = ground(at: p) { ballAt = g }
+      if let g = place.ground(at: p, size: size) { ballAt = place.clamp(g) }
       return
     }
     if stroking {
@@ -484,9 +556,9 @@ final class PlayScene: SKScene {
       return
     }
     // A tap on the ground: come here.
-    if let s = touchStart, hypot(p.x - s.x, p.y - s.y) < 12, let g = ground(at: p), mood != .chase, mood != .carry {
+    if let s = touchStart, hypot(p.x - s.x, p.y - s.y) < 12, let g = place.ground(at: p, size: size), mood != .chase, mood != .carry {
       if mood == .sleep { mood = .rest; onEvent?("wake") }
-      go(to: g, run: hypot(g.x - pos.x, g.y - pos.y) > 0.25)
+      go(to: g, run: hypot(g.x - pos.x, g.y - pos.y) > m(1.8))
       mood = .wander
       onEvent?(running ? "run" : "wander")
     }
@@ -504,22 +576,24 @@ final class PlayScene: SKScene {
     case "call":
       if mood == .sleep { onEvent?("wake") }
       mood = .wander
-      go(to: CGPoint(x: PlayScene.you.x + .random(in: -0.08...0.08), y: 1.0), run: true)
+      let you = place.you()
+      go(to: CGPoint(x: you.x + m(.random(in: -0.5...0.5)), y: you.y - m(0.6)), run: true)
       happyUntil = now + 6
       onEvent?("call")
     case "play":
       guard !ballFlying && !ballCarried else { return }
-      ballAt = CGPoint(x: 0.6, y: 1.05)
+      let you = place.you()
+      ballAt = place.clamp(CGPoint(x: you.x + m(0.3), y: you.y - m(0.2)))
       throwBall(velocity: CGVector(dx: .random(in: -500...500), dy: .random(in: 700...1100)))
     case "pet":
       mood = .petted
       happyUntil = now + 4
       moodUntil = now + 3
-      lookAt = screen(PlayScene.you, up: 1)
+      lookAt = screen(place.you(), up: 1)
       for i in 0..<5 {
         run(.wait(forDuration: Double(i) * 0.25)) { [weak self] in
-          guard let self else { return }
-          self.heart(at: self.screen(self.pos, up: PlayScene.dogMetres * 1.05))
+          guard let self, let p = self.screen(self.pos, up: PlayScene.dogMetres * 1.05) else { return }
+          self.heart(at: p)
         }
       }
       run(.wait(forDuration: 3)) { [weak self] in if self?.mood == .petted { self?.mood = .rest } }

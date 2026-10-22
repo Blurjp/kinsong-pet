@@ -29,6 +29,8 @@ import { GardenScene, walkMs } from "../components/GardenScene";
 import { AliveStage } from "../components/AliveStage";
 import { SCENES, sceneById } from "../alive/scenes";
 import { PlayStage, type PlayCommand } from "../components/PlayStage";
+import { ARHome } from "../components/ARHome";
+import { ARPlayView } from "../../modules/pet-cutout";
 import { sceneProgress, type AliveAction } from "../alive/types";
 import { useAlivePet } from "../alive/useAlivePet";
 import { PhotoViewer } from "../components/PhotoViewer";
@@ -128,6 +130,7 @@ export function GardenScreen({
   const commandKey = useRef(0);
   const lastTreat = useRef<string | undefined>(undefined);
   const [playCaption, setPlayCaption] = useState<string>();
+  const [atHome, setAtHome] = useState(false);
   const sound = (prefer: Parameters<typeof pickSound>[1], bark: boolean) => {
     if (!state.soundOn) return;
     const own = bark ? state.clips.find((c) => c.action === "bark" && c.audioUri)?.audioUri : undefined;
@@ -249,7 +252,9 @@ export function GardenScreen({
             {SCENES.map((sc) => (
               <Chip key={sc.id} label={sc.title} on={sc.id === playScene.id} onPress={() => update((st) => (st.play ? { ...st, play: { ...st.play, scene: sc.id } } : st))} />
             ))}
+            {ARPlayView && <Chip label={`📷 ${pet.name} at home`} on={false} onPress={() => setAtHome(true)} />}
           </View>
+          {atHome && <ARHome name={pet.name} play={play} caption={playCaption} onEvent={onPlayEvent} onClose={() => setAtHome(false)} />}
         </>
       ) : alive && aliveScene && aliveState ? (
         <AliveStage

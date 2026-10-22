@@ -10,7 +10,8 @@
       "bundleIdentifier": "app.kinsong.pets",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Kinsong Pets uses the camera to show your pet in your home, and to take photos of them."
       },
       "entitlements": {
         "com.apple.security.application-groups": [

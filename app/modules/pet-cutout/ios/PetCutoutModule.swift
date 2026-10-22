@@ -96,6 +96,19 @@ public class PetCutoutModule: Module {
       }
     }
 
+    View(ARPlayView.self) {
+      Events("onPlayEvent")
+      Prop("pet") { (view: ARPlayView, pet: [String: Any]?) in
+        view.setPet(pet)
+      }
+      Prop("ball") { (view: ARPlayView, uri: String?) in
+        view.setBall(uri)
+      }
+      Prop("command") { (view: ARPlayView, command: [String: Any]?) in
+        view.setCommand(command)
+      }
+    }
+
     View(AliveView.self) {
       Events("onActionEnd")
       Prop("loopUri") { (view: AliveView, uri: String?) in
@@ -494,11 +507,11 @@ final class PlayView: ExpoView {
 
   func refresh() {
     guard let pet, !rig.isEmpty, bounds.width > 0 else { return }
-    let setup = PlayScene.Setup(background: background, pet: pet, rig: rig, ball: ball, asleep: asleep, asleepFacesRight: asleepFacesRight, horizon: horizon, cameraMetres: cameraMetres, night: night)
-    if let scene {
+    let setup = PlayScene.Setup(background: background, pet: pet, rig: rig, ball: ball, asleep: asleep, asleepFacesRight: asleepFacesRight, night: night)
+    if let scene, let world = scene.place as? PhotoWorld, world.horizon == horizon, world.cameraMetres == cameraMetres {
       scene.update(setup: setup)
     } else {
-      let s = PlayScene(size: bounds.size, setup: setup)
+      let s = PlayScene(size: bounds.size, setup: setup, world: PhotoWorld(horizon: horizon, cameraMetres: cameraMetres))
       s.onEvent = { [weak self] type in self?.onPlayEvent(["type": type]) }
       scene = s
       skView.presentScene(s)
