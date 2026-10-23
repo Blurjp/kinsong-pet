@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   LANDMARKS,
+  CLIP_ACTIONS,
   activityWeights,
+  canTravel,
+  clipCaption,
+  clipActionsFor,
   coatColorsFromImage,
   isNight,
   nextMoment,
   pickSound,
+  pickVideoClip,
   react,
   type LifeContext,
   type SoundClip,
+  type VideoClip,
 } from "../src/petLife";
 
 const base: LifeContext = { name: "Max", species: "dog", traits: [], hour: 14, seed: 1, flowers: [], toy: "squeaky duck" };
@@ -101,6 +107,53 @@ describe("pickSound", () => {
   it("falls back to any of their recordings, or nothing when there are none", () => {
     expect(pickSound(clips, ["purr"], 1)).toBeDefined();
     expect(pickSound([], ["bark"], 1)).toBeUndefined();
+  });
+});
+
+describe("pickVideoClip", () => {
+  const clip = (id: string, action: VideoClip["action"], closeUp = false): VideoClip => ({
+    id,
+    action,
+    dir: `file:///clips/${id}/`,
+    videoUri: `file:///clips/${id}/clip.mov`,
+    posterUri: `file:///clips/${id}/poster.png`,
+    width: 600,
+    height: 540,
+    seconds: 6,
+    cutout: true,
+    closeUp,
+    facing: "right",
+  });
+  const clips = [clip("s", "sit"), clip("w", "walk"), clip("b1", "bark"), clip("b2", "bark")];
+
+  it("barks when called, using one of the bark clips", () => {
+    const r = react("call", { name: "Max", species: "dog", here: { x: 0.3, depth: 0.4 } });
+    expect(r.clips[0]).toBe("bark");
+    expect(["b1", "b2"]).toContain(pickVideoClip(clips, r.clips, 3)?.id);
+  });
+
+  it("matches the pose, falling back to sitting, then to any clip", () => {
+    expect(pickVideoClip(clips, clipActionsFor("walk"), 1)?.id).toBe("w");
+    expect(pickVideoClip(clips, clipActionsFor("sleep"), 1)?.id).toBe("s");
+    expect(pickVideoClip([clip("w", "walk")], clipActionsFor("eat"), 1)?.id).toBe("w");
+    for (let seed = 0; seed < 20; seed++) expect(pickVideoClip([clip("w", "walk"), clip("b", "bark")], clipActionsFor("sleep"), seed)?.id).toBe("b");
+  });
+
+  it("only travels when there's footage of it walking on its own feet", () => {
+    expect(canTravel(clips)).toBe(true);
+    expect(canTravel([clip("s", "sit"), clip("b", "bark")])).toBe(false);
+    expect(canTravel([clip("w", "walk", true)])).toBe(false);
+  });
+
+  it("describes what the footage shows, and is never sad", () => {
+    expect(clipCaption("Max", "bark", true)).toBe("Max barks hello!");
+    expect(clipCaption("Max", "sit", true)).toBe("Max sits with you under the stars.");
+    for (const a of CLIP_ACTIONS) for (const night of [true, false]) expect(clipCaption("Max", a, night)).not.toMatch(/hungry|lonely|sad|miss|waiting|alone/i);
+  });
+
+  it("is reproducible for a seed, and empty without footage", () => {
+    expect(pickVideoClip(clips, ["bark"], 9)).toEqual(pickVideoClip(clips, ["bark"], 9));
+    expect(pickVideoClip([], ["sit"], 1)).toBeUndefined();
   });
 });
 

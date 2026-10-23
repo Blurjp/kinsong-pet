@@ -1,7 +1,10 @@
 node_modules/
 .expo/
 ios/
+# Native code for local Expo modules is source, unlike the generated app/ios.
+!app/modules/*/ios/
 android/
 *.log
 .DS_Store
 dist/
+.env*.local

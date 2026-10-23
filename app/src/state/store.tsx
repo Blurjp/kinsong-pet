@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { PetPhoto, PetProfile, SoundClip, Visit } from "@sinian/core";
+import { relocateState } from "./paths";
+import type { AliveState } from "../alive/types";
+import type { PlayState } from "../play/setup";
+import type { PetPhoto, PetProfile, SoundClip, VideoClip, Visit } from "@sinian/core";
 
 /** Everything stays on the device. One pet per install for the prototype. */
 export interface PetState {
@@ -10,17 +13,27 @@ export interface PetState {
   photos: PetPhoto[];
   /** The family's own recordings of the pet: barks, purrs, chirps. */
   sounds: SoundClip[];
+  /** Clips from the family's own videos; once there are any, the garden shows the real pet. */
+  clips: VideoClip[];
   /** Play recordings when the pet reacts. */
   soundOn: boolean;
+  /** A photo of somewhere the pet loved, for the real pet to live in instead of the meadow. */
+  place?: { uri: string; horizon: number };
+  /** Remind on remembrance days (local notifications, off until the family turns them on). */
+  remindersOn?: boolean;
+  /** The pet brought to life in photographed scenes by a video model, with the family's agreement. */
+  alive?: AliveState;
+  /** The pet as a real-time puppet made from their photo, to play with. */
+  play?: PlayState;
 }
 
 const KEY = "kinsong-pets/v1";
-const EMPTY: PetState = { visits: [], photos: [], sounds: [], soundOn: true };
+const EMPTY: PetState = { visits: [], photos: [], sounds: [], clips: [], soundOn: true };
 
 export async function loadState(): Promise<PetState> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    return raw ? { ...EMPTY, ...(JSON.parse(raw) as PetState) } : EMPTY;
+    return raw ? relocateState({ ...EMPTY, ...(JSON.parse(raw) as PetState) }) : EMPTY;
   } catch {
     return EMPTY;
   }

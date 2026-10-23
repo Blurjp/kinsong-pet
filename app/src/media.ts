@@ -5,16 +5,19 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { Directory, File, Paths } from "expo-file-system";
 import { createAudioPlayer } from "expo-audio";
 import { decode as decodeJpeg } from "jpeg-js";
-import { base64ToBytes, coatColorsFromImage } from "@sinian/core";
+import { base64ToBytes, coatColorsFromImage, type VideoClip } from "@sinian/core";
+import { PetCutout } from "../modules/pet-cutout";
 
 /**
- * Photos and recordings of the pet. Everything stays on the device:
+ * Photos, recordings and video clips of the pet. Everything stays on the device:
  * native builds copy files into the app's private documents folder; the
  * web preview keeps small data URIs in local storage.
  */
 
 const isWeb = Platform.OS === "web";
 const MAX_WEB_AUDIO_BYTES = 1_500_000;
+/** Longest clip the cut-out keeps, at the video's own frame rate (up to 30 fps). */
+const CLIP_SECONDS = 8;
 
 function mediaDir(): Directory {
   const d = new Directory(Paths.document, "pet-media");
@@ -41,6 +44,30 @@ export async function pickPhotos(): Promise<string[]> {
   return out;
 }
 
+/** One photo, full size, for cutting the pet out of. Returns the picker's URI (kept only until it's cut out). */
+export async function pickOnePhoto(): Promise<string | undefined> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1 });
+  return r.canceled ? undefined : r.assets[0]?.uri;
+}
+
+/**
+ * Let the owner choose a photo of somewhere the pet loved, cropped to the
+ * garden's 4:3 on the phone. Returns a stored URI.
+ */
+export async function pickPlacePhoto(): Promise<string | undefined> {
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1 });
+  const a = r.canceled ? undefined : r.assets[0];
+  if (!a) return undefined;
+  const w = a.width, h = a.height;
+  const crop = w / h > 4 / 3 ? { width: Math.round((h * 4) / 3), height: h } : { width: w, height: Math.round((w * 3) / 4) };
+  const out = await manipulateAsync(
+    a.uri,
+    [{ crop: { originX: Math.round((w - crop.width) / 2), originY: Math.round((h - crop.height) / 2), ...crop } }, { resize: { width: 1440 } }],
+    { compress: 0.86, format: SaveFormat.JPEG, base64: isWeb },
+  );
+  return isWeb ? `data:image/jpeg;base64,${out.base64}` : keepNative(out.uri, `place-${Date.now()}.jpg`);
+}
+
 async function blobToDataUri(uri: string): Promise<string> {
   const blob = await (await fetch(uri)).blob();
   if (blob.size > MAX_WEB_AUDIO_BYTES) throw new Error("That recording is too long for the web preview. Try a clip under about 30 seconds.");
@@ -62,14 +89,38 @@ export async function pickRecording(): Promise<string | undefined> {
   return keepNative(a.uri, `sound-${Date.now()}.${ext}`);
 }
 
-/** Remove a stored file (no-op for web data URIs). */
+/** Remove a stored file or clip folder (no-op for web data URIs). */
 export function forget(uri: string): void {
   if (isWeb || !uri.startsWith("file:")) return;
   try {
-    const f = new File(uri);
+    const f = uri.endsWith("/") ? new Directory(uri) : new File(uri);
     if (f.exists) f.delete();
   } catch {
     // already gone
+  }
+}
+
+/**
+ * Let the owner choose a short video of their pet (trimmed in the picker), and
+ * cut the pet out of it on the phone. The garden then shows these real frames.
+ */
+export async function importVideoClip(onProgress?: (fraction: number) => void): Promise<Omit<VideoClip, "id" | "action"> | undefined> {
+  if (!PetCutout) throw new Error("Video clips need the installed app. They don't work in the web preview or Expo Go.");
+  const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], allowsEditing: true, videoMaxDuration: CLIP_SECONDS });
+  const a = r.canceled ? undefined : r.assets[0];
+  if (!a) return undefined;
+  const dir = new Directory(mediaDir(), `clip-${Date.now()}`);
+  dir.create();
+  const sub = onProgress ? PetCutout.addListener("onProgress", (e) => onProgress(e.progress)) : undefined;
+  try {
+    const out = await PetCutout.cutOut(a.uri, dir.uri, { maxSeconds: CLIP_SECONDS, maxFps: 30, size: 720 });
+    // A trailing slash marks it as a folder for forget().
+    return { dir: dir.uri.endsWith("/") ? dir.uri : `${dir.uri}/`, ...out };
+  } catch (e) {
+    dir.delete();
+    throw e;
+  } finally {
+    sub?.remove();
   }
 }
 

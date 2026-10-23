@@ -9,6 +9,9 @@
  *    pet does not talk, and nothing claims to be the real animal.
  *  - Its voice is the family's own recordings, played back as-is. Nothing
  *    is synthesised.
+ *  - With video clips, it looks and moves exactly as in the family's own
+ *    footage: the real frames, cut out of their background. It can only do
+ *    what the footage shows; no new movement is generated.
  */
 
 import type { RgbaImage } from "./likeness";
@@ -31,6 +34,47 @@ export interface PetPhoto {
   id: string;
   uri: string;
   addedOn: string;
+}
+
+/** What a clip from the family's own video shows the pet doing. */
+export type ClipAction = "sit" | "walk" | "play" | "bark" | "sleep" | "eat";
+
+export const CLIP_ACTIONS: readonly ClipAction[] = ["sit", "walk", "play", "bark", "sleep", "eat"];
+
+/**
+ * A short clip from the family's own video, cut out of its background on the
+ * phone. The picture is the real footage at its own frame rate, with the
+ * background made transparent; the sound is the clip's own audio, untouched.
+ * Nothing is generated.
+ */
+export interface VideoClip {
+  id: string;
+  action: ClipAction;
+  /** Folder holding the video, poster and audio, so the clip can be forgotten in one go. */
+  dir: string;
+  videoUri: string;
+  /** The first frame, for places that don't play video. */
+  posterUri: string;
+  /** Frame size in pixels. Unless it's a close-up, the pet's feet touch the bottom edge. */
+  width: number;
+  height: number;
+  seconds: number;
+  /** False when the pet couldn't be separated from the background, so the footage keeps it. */
+  cutout: boolean;
+  /** The pet runs off the bottom of the picture, so it's shown near, from the bottom of the scene. */
+  closeUp: boolean;
+  /** Which way the pet travels in the footage, to face it the right way in the garden. */
+  facing: "left" | "right";
+  audioUri?: string;
+}
+
+/**
+ * How the real pet moves in the garden. A real animal can't glide, so it only
+ * travels when there's a walking clip to show it walking; otherwise it stays
+ * where it is and only what it's doing changes. Close-ups never travel.
+ */
+export function canTravel(clips: readonly VideoClip[]): boolean {
+  return clips.some((c) => c.action === "walk" && !c.closeUp);
 }
 
 /** A point in the meadow: x 0..1 left→right, depth 0 (far) → 1 (near). */
@@ -175,11 +219,20 @@ export interface Reaction {
   caption: string;
   /** Recording tags to try, in order. */
   sounds: SoundTag[];
+  /** Video clip actions to try, in order. */
+  clips: ClipAction[];
   /** Small floating hearts in the scene. */
   hearts: boolean;
 }
 
 type ReactionText = Partial<Record<Species, string>> & { default: string };
+
+const REACTION_CLIPS: Record<Interaction, ClipAction[]> = {
+  pet: ["play", "sit"],
+  call: ["bark", "play"],
+  play: ["play", "bark"],
+  treat: ["eat", "sit"],
+};
 
 const REACTIONS: Record<Interaction, { text: ReactionText; sounds: Partial<Record<Species, SoundTag[]>> & { default: SoundTag[] }; pose: Pose; at: (c: ReactContext) => Spot }> = {
   pet: {
@@ -246,8 +299,60 @@ export function react(i: Interaction, c: ReactContext): Reaction {
     seconds: 5,
     caption: text,
     sounds: r.sounds[c.species] ?? r.sounds.default,
+    clips: REACTION_CLIPS[i],
     hearts: i === "pet" || i === "call",
   };
+}
+
+const POSE_CLIPS: Record<Pose, ClipAction[]> = {
+  sit: ["sit"],
+  walk: ["walk"],
+  sleep: ["sleep"],
+  happy: ["play", "bark"],
+  eat: ["eat"],
+};
+
+/** Clip actions to try for a pose, in order. */
+export function clipActionsFor(pose: Pose): ClipAction[] {
+  return POSE_CLIPS[pose];
+}
+
+const CLIP_CAPTION: Record<ClipAction, { day: string; night?: string }> = {
+  sit: { day: "{name} sits in the warm sun, watching you.", night: "{name} sits with you under the stars." },
+  walk: { day: "{name} trots across the meadow." },
+  play: { day: "{name} is in a playful mood." },
+  bark: { day: "{name} barks hello!" },
+  sleep: { day: "{name} is fast asleep in the grass.", night: "{name} is fast asleep under the stars." },
+  eat: { day: "{name} is munching away happily." },
+};
+
+/**
+ * What the family can see the real pet doing. When there's no footage of what
+ * the pet "would" be doing (asleep, but no sleeping clip), the caption has to
+ * describe the clip that is showing, not the moment that was planned.
+ */
+export function clipCaption(name: string, action: ClipAction, night: boolean): string {
+  const c = CLIP_CAPTION[action];
+  return ((night && c.night) || c.day).replace("{name}", name);
+}
+
+/**
+ * Choose one of the family's video clips: the first preferred action that has
+ * clips, then a sitting clip (calm enough to stand in for anything), then any
+ * clip that isn't walking, so the pet always looks like itself once there is
+ * footage. A walking clip only stands in when there's nothing else, since
+ * walking on the spot is the one thing a real pet never does.
+ */
+export function pickVideoClip(clips: readonly VideoClip[], prefer: readonly ClipAction[], seed: number): VideoClip | undefined {
+  if (!clips.length) return undefined;
+  const r = rng(seed);
+  const pick = (list: readonly VideoClip[]) => list[Math.floor(r() * list.length)];
+  for (const action of [...prefer, "sit" as const]) {
+    const matching = clips.filter((c) => c.action === action);
+    if (matching.length) return pick(matching);
+  }
+  const still = clips.filter((c) => c.action !== "walk");
+  return pick(still.length ? still : clips);
 }
 
 /**

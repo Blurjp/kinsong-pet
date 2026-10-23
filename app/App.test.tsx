@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PetsApp } from "./App";
 import { GardenScreen } from "./src/screens/GardenScreen";
@@ -8,10 +8,45 @@ import * as media from "./src/media";
 jest.mock("./src/media", () => ({
   pickPhotos: jest.fn(async () => ["file:///photos/max-1.jpg"]),
   pickRecording: jest.fn(async () => "file:///sounds/bark.m4a"),
+  pickPlacePhoto: jest.fn(async () => "file:///places/backyard.jpg"),
+  pickOnePhoto: jest.fn(async () => "file:///photos/side.jpg"),
+  importVideoClip: jest.fn(async () => ({
+    dir: "file:///clips/new/",
+    videoUri: "file:///clips/new/clip.mov",
+    posterUri: "file:///clips/new/poster.png",
+    width: 600,
+    height: 540,
+    seconds: 6,
+    cutout: true,
+    closeUp: false,
+    facing: "right",
+  })),
   coatFromPhoto: jest.fn(async () => ({ coat: "#d6a866", accent: "#5c3a22" })),
   play: jest.fn(),
   forget: jest.fn(),
 }));
+
+const barkClip = {
+  id: "c1",
+  action: "bark" as const,
+  dir: "file:///clips/c1/",
+  videoUri: "file:///clips/c1/clip.mov",
+  posterUri: "file:///clips/c1/poster.png",
+  width: 600,
+  height: 540,
+  seconds: 6,
+  cutout: true,
+  closeUp: false,
+  facing: "right" as const,
+  audioUri: "file:///clips/c1/sound.m4a",
+};
+
+jest.mock("./src/play/setup", () => ({
+  playFromPhoto: jest.fn(async () => ({ pet: { uri: "file:///play/pet.png", width: 600, height: 400, from: "photo" }, rig: { nose: [0.9, 0.3, 0.8] } })),
+  playFromClip: jest.fn(async () => undefined),
+  asleepFromPhoto: jest.fn(async () => ({ uri: "file:///play/asleep.png", width: 700, height: 300, facesRight: false })),
+}));
+jest.mock("./modules/pet-cutout", () => ({ PetCutout: {}, PlayView: undefined, AliveView: undefined, PetClipView: undefined }));
 
 const played = media.play as jest.Mock;
 const t = today();
@@ -68,6 +103,42 @@ describe("Kinsong Pets", () => {
     await fireEvent.press(screen.getByText("📣  Call Max"));
     expect(screen.getByText("Max hears your voice and comes running!")).toBeTruthy();
     expect(played).toHaveBeenCalledWith("file:///bark.m4a");
+  });
+
+  it("barks with the sound from their own video when called", async () => {
+    await render(<PetsApp initial={seeded({ clips: [barkClip] })} />);
+    await layout();
+    await fireEvent.press(screen.getByText("📣  Call Max"));
+    expect(played).toHaveBeenCalledWith("file:///clips/c1/sound.m4a");
+    expect(screen.getByText(/A simulation of Max, made from your own video/)).toBeTruthy();
+  });
+
+  it("lives in the photographed meadow once there's footage, with the family's photos laid out below", async () => {
+    await render(<PetsApp initial={seeded({ clips: [barkClip], photos: [{ id: "p1", uri: "file:///photos/max-1.jpg", addedOn: t }] })} />);
+    await layout();
+    await fireEvent.press(screen.getByLabelText("Open photo"));
+    expect(played).toHaveBeenCalled(); // the photo viewer plays one of their sounds
+  });
+
+  it("walks over at a real pace before barking, when there's footage of it walking", async () => {
+    jest.useFakeTimers();
+    try {
+      const walkClip = { ...barkClip, id: "c2", action: "walk" as const, audioUri: undefined };
+      const s = seeded({ clips: [barkClip, walkClip] });
+      await render(
+        <StoreProvider initial={s}>
+          <GardenScreen pet={s.pet!} hour={14} autoplay={false} />
+        </StoreProvider>,
+      );
+      await fireEvent.press(screen.getByText("📣  Call Max"));
+      expect(played).not.toHaveBeenCalled(); // still on its way
+      await act(async () => {
+        jest.advanceTimersByTime(10_000);
+      });
+      expect(played).toHaveBeenCalledWith("file:///clips/c1/sound.m4a");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("can be petted by tapping them in the garden", async () => {
@@ -135,7 +206,69 @@ describe("Kinsong Pets", () => {
   });
 });
 
+describe("Playing", () => {
+  const playing = { pet: { uri: "file:///play/pet.png", width: 600, height: 400, from: "photo" as const }, rig: { nose: [0.9, 0.3, 0.8] } };
+
+  it("makes them into a puppet from one photo, and the garden becomes somewhere to play", async () => {
+    await render(<PetsApp initial={seeded()} />);
+    await fireEvent.press(screen.getByText("Memories"));
+    await fireEvent.press(screen.getByText("Choose their photo"));
+    expect(await screen.findByText(/Max is in the garden now/)).toBeTruthy();
+    // The skeleton is found the way that suits the species (Vision for cats and dogs, the outline for others).
+    expect(jest.requireMock("./src/play/setup").playFromPhoto).toHaveBeenCalledWith("file:///photos/side.jpg", "dog");
+    const saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.play).toMatchObject({ pet: { uri: "file:///play/pet.png", from: "photo" } });
+    await fireEvent.press(screen.getByText("Add a photo of them asleep"));
+    expect(await screen.findByText(/At night Max will sleep like that/)).toBeTruthy();
+    const withSleep = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(withSleep.play?.asleep).toEqual({ uri: "file:///play/asleep.png", width: 700, height: 300, facesRight: false });
+    await fireEvent.press(screen.getByText("Garden"));
+    expect(screen.getByText(/flick the ball to throw it/)).toBeTruthy();
+    expect(screen.getByText(/moving as a puppet on your phone. Imagined, not filmed/)).toBeTruthy();
+  });
+
+  it("plays in any of the scenes", async () => {
+    await render(<PetsApp initial={seeded({ play: playing })} />);
+    expect(screen.getByLabelText("Max in the summer meadow")).toBeTruthy();
+    await fireEvent.press(screen.getByText("Beach at sunset"));
+    expect(screen.getByLabelText("Max in the beach at sunset")).toBeTruthy();
+    const saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.play?.scene).toBe("beach");
+  });
+});
+
 describe("Memories", () => {
+  it("lets the real pet live somewhere it loved, and go back to the meadow", async () => {
+    await render(<PetsApp initial={seeded({ clips: [barkClip] })} />);
+    await fireEvent.press(screen.getByText("Memories"));
+    await fireEvent.press(screen.getByText("Choose a photo"));
+    expect(await screen.findByText(/Drag the line to where the ground meets the distance, so Max/)).toBeTruthy();
+    let saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.place).toEqual({ uri: "file:///places/backyard.jpg", horizon: 0.55 });
+    expect(screen.getByLabelText(/Their place/)).toBeTruthy();
+    await fireEvent.press(screen.getByText("Back to the meadow"));
+    saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.place).toBeUndefined();
+    expect(media.forget).toHaveBeenCalledWith("file:///places/backyard.jpg");
+  });
+
+  it("adds a video clip and lets you tag what they're doing and which way they face", async () => {
+    await render(<PetsApp initial={seeded()} />);
+    await fireEvent.press(screen.getByText("Memories"));
+    await fireEvent.press(screen.getByText("Add a video"));
+    expect(await screen.findByText(/Max is in the garden now, just as in your video/)).toBeTruthy();
+    let saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.clips).toMatchObject([{ action: "sit", videoUri: "file:///clips/new/clip.mov" }]);
+    await fireEvent.press(screen.getByText("Playing"));
+    saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.clips[0]!.action).toBe("play");
+    await fireEvent.press(screen.getByText("Facing right →"));
+    saved = JSON.parse((await AsyncStorage.getItem("kinsong-pets/v1"))!) as PetState;
+    expect(saved.clips[0]!.facing).toBe("left");
+    await fireEvent.press(screen.getAllByText("Remove")[0]!); // the video card comes before the recordings
+    expect(media.forget).toHaveBeenCalledWith("file:///clips/new/");
+  });
+
   it("adds photos, takes the pet's colours from the first one, and hangs it in the garden", async () => {
     await render(<PetsApp initial={seeded({ sounds: [] })} />);
     await fireEvent.press(screen.getByText("Memories"));

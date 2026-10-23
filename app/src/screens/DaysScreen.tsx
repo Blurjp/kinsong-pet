@@ -1,7 +1,9 @@
 import { Alert, Platform, Text, View } from "react-native";
 import { occasionTitle, upcomingOccasions, type PetProfile, type Visit } from "@sinian/core";
+import { useState } from "react";
 import { today, useStore } from "../state/store";
-import { Button, Card, Note, colors } from "../ui";
+import { allowReminders } from "../reminders";
+import { Button, Card, Chip, Note, colors } from "../ui";
 
 function prettyDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -23,7 +25,22 @@ function describe(v: Visit): string {
 
 /** Remembrance days ahead, and a journal of every visit. */
 export function DaysScreen({ pet, onEdit }: { pet: PetProfile; onEdit: () => void }) {
-  const { state, reset } = useStore();
+  const { state, update, reset } = useStore();
+  const [note, setNote] = useState<string>();
+
+  const toggleReminders = async () => {
+    if (state.remindersOn) {
+      update((st) => ({ ...st, remindersOn: false }));
+      setNote(undefined);
+      return;
+    }
+    if (!(await allowReminders())) {
+      setNote("Notifications are off for this app. You can turn them on in Settings.");
+      return;
+    }
+    update((st) => ({ ...st, remindersOn: true }));
+    setNote(`We'll send one gentle note on each of these days, at 10 am.`);
+  };
   const upcoming = upcomingOccasions(pet, today(), 365);
   const journal = [...state.visits].sort((a, b) => b.on.localeCompare(a.on));
 
@@ -43,6 +60,10 @@ export function DaysScreen({ pet, onEdit }: { pet: PetProfile; onEdit: () => voi
     <View>
       <Card title="Days to remember">
         <Note>{"We'll only remind you on these days — never on ordinary ones."}</Note>
+        <View style={{ flexDirection: "row", marginBottom: 6 }}>
+          <Chip label={state.remindersOn ? "🔔 Reminders on" : "🔕 Remind me on these days"} on={!!state.remindersOn} onPress={() => void toggleReminders()} />
+        </View>
+        {note && <Note>{note}</Note>}
         {upcoming.map((o) => (
           <View key={o.kind + o.on} style={{ paddingVertical: 8, borderBottomWidth: 0.5, borderColor: "#eee" }}>
             <Text style={{ fontSize: 15, color: colors.ink }}>{occasionTitle(pet, o)}</Text>

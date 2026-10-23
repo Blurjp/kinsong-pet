@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 import Svg, {
   Circle,
   ClipPath,
@@ -14,14 +14,25 @@ import Svg, {
   Stop,
   Text as SvgText,
 } from "react-native-svg";
-import type { GardenState, PetPhoto, PetProfile, Pose, Spot } from "@sinian/core";
+import type { GardenState, PetPhoto, PetProfile, Pose, Spot, VideoClip } from "@sinian/core";
 import { PetSprite } from "./PetSprite";
+import { ClipPlayer } from "./ClipPlayer";
+import { DOG_METRES, MEADOW, PhotoBackdrop, PhotoFront, groundY, unitsPerMetre, type Place } from "./PhotoGarden";
 import { Flower } from "./Flower";
 
 const W = 400;
 const H = 300;
 const RAINBOW = ["#f4a4a4", "#f7c58b", "#f6e08f", "#a9dba0", "#9cc9ee", "#b9a6e3"];
 const STARS = Array.from({ length: 34 }, (_, i) => ({ x: (i * 97) % W, y: (i * 53) % 150, r: i % 3 ? 0.9 : 1.6 }));
+
+/**
+ * How long the real pet takes to walk between two spots: a steady, unhurried
+ * walk of about 60 scene units a second, never an eased glide. The garden
+ * screen waits this long before it lets the pet settle into what it's doing.
+ */
+export function walkMs(from: Spot, to: Spot): number {
+  return (Math.hypot((to.x - from.x) * W, (to.depth - from.depth) * 72) / 60) * 1000;
+}
 
 /** Feet position in scene units for a meadow spot. */
 export function footOf(at: Spot): { x: number; y: number } {
@@ -33,6 +44,12 @@ export interface SceneProps {
   garden: GardenState;
   at: Spot;
   pose: Pose;
+  /** A clip from the family's own video to show instead of the storybook pet. */
+  clip?: VideoClip;
+  /** Changing it plays the clip from its start, in step with its sound. */
+  restartKey?: number;
+  /** For the real pet: the photographed place it lives in (the meadow unless the family chose one). */
+  place?: Place;
   night: boolean;
   photos: readonly PetPhoto[];
   /** Changes each time hearts should float up. */
@@ -42,8 +59,10 @@ export interface SceneProps {
 }
 
 /** The meadow by the Rainbow Bridge, with the pet living in it. */
-export function GardenScene({ pet, garden, at, pose, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
+export function GardenScene({ pet, garden, at, pose, clip, restartKey, place = MEADOW, night, photos, heartsKey, onPetPress, onPhotoPress }: SceneProps) {
   const [k, setK] = useState(0); // px per scene unit, known after layout
+  // The real pet lives in a real meadow; the storybook pet keeps its illustrated one.
+  const photo = !!clip;
 
   return (
     <View
@@ -52,90 +71,102 @@ export function GardenScene({ pet, garden, at, pose, night, photos, heartsKey, o
       onLayout={(e) => setK(e.nativeEvent.layout.width / W)}
     >
       <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
-        <Defs>
-          <LinearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={night ? "#1d2b52" : "#bfe2f4"} />
-            <Stop offset="0.75" stopColor={night ? "#4a4f7d" : "#fbefdc"} />
-          </LinearGradient>
-          <RadialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-            <Stop offset="0" stopColor={night ? "#fdf6d8" : "#fff6c8"} stopOpacity={night ? 0.5 : 0.95} />
-            <Stop offset="1" stopColor="#fff6c8" stopOpacity={0} />
-          </RadialGradient>
-          <LinearGradient id="meadow" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={night ? "#4f7c63" : "#a8d98f"} />
-            <Stop offset="1" stopColor={night ? "#3d6650" : "#7fc46c"} />
-          </LinearGradient>
-          {photos.slice(0, 3).map((p, i) => (
-            <ClipPath key={p.id} id={`ph${i}`}>
-              <Rect x={polaroid(i).x + 3} y={polaroid(i).y + 3} width={26} height={24} />
-            </ClipPath>
-          ))}
-        </Defs>
+        {photo ? (
+          <PhotoBackdrop garden={garden} night={night} toy={pet.favorites.toys.length > 0} place={place} />
+        ) : (
+          <>
+            <Defs>
+              <LinearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={night ? "#1d2b52" : "#bfe2f4"} />
+                <Stop offset="0.75" stopColor={night ? "#4a4f7d" : "#fbefdc"} />
+              </LinearGradient>
+              <RadialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+                <Stop offset="0" stopColor={night ? "#fdf6d8" : "#fff6c8"} stopOpacity={night ? 0.5 : 0.95} />
+                <Stop offset="1" stopColor="#fff6c8" stopOpacity={0} />
+              </RadialGradient>
+              <LinearGradient id="meadow" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={night ? "#4f7c63" : "#a8d98f"} />
+                <Stop offset="1" stopColor={night ? "#3d6650" : "#7fc46c"} />
+              </LinearGradient>
+              {photos.slice(0, 3).map((p, i) => (
+                <ClipPath key={p.id} id={`ph${i}`}>
+                  <Rect x={polaroid(i).x + 3} y={polaroid(i).y + 3} width={26} height={24} />
+                </ClipPath>
+              ))}
+            </Defs>
 
-        <Rect width={W} height={H} fill="url(#sky)" />
-        {night && STARS.map((s, i) => <Circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={0.85} />)}
-        <Circle cx={330} cy={52} r={night ? 46 : 70} fill="url(#glow)" />
-        {night && <Circle cx={330} cy={52} r={15} fill="#fbf3d3" />}
+            <Rect width={W} height={H} fill="url(#sky)" />
+            {night && STARS.map((s, i) => <Circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#fff" opacity={0.85} />)}
+            <Circle cx={330} cy={52} r={night ? 46 : 70} fill="url(#glow)" />
+            {night && <Circle cx={330} cy={52} r={15} fill="#fbf3d3" />}
 
-        <G opacity={night ? 0.35 : 0.75}>
-          {RAINBOW.map((c, i) => (
-            <Path key={c} d={`M ${170 + i * 7} 196 A ${150 - i * 7} ${125 - i * 7} 0 0 1 ${470 - i * 7} 196`} stroke={c} strokeWidth={7} fill="none" />
-          ))}
-        </G>
-        <Cloud x={176} y={186} s={1.1} night={night} />
-        {!night && <Cloud x={250} y={36} s={0.55} night={night} />}
-
-        <Path d={`M0 200 Q90 160 200 190 T400 178 V${H} H0 Z`} fill={night ? "#5a7f6c" : "#c7e6b4"} />
-        <Path d={`M0 214 Q120 190 230 208 T400 204 V${H} H0 Z`} fill="url(#meadow)" />
-
-        <MemoryTree x={66} y={226} rings={garden.treeRings} night={night} />
-
-        {/* the family's photos, hanging like polaroids on a string */}
-        {photos.length > 0 && <Path d="M8 98 Q70 122 128 100" stroke="#e9dcc6" strokeWidth={1.2} fill="none" />}
-        {photos.slice(0, 3).map((p, i) => {
-          const { x, y } = polaroid(i);
-          return (
-            <G key={p.id} onPress={onPhotoPress ? () => onPhotoPress(p) : undefined} transform={`rotate(${[-6, 4, -3][i]} ${x + 16} ${y})`}>
-              <Rect x={x} y={y} width={32} height={36} fill="#fffdf8" />
-              <SvgImage href={{ uri: p.uri }} x={x + 3} y={y + 3} width={26} height={24} preserveAspectRatio="xMidYMid slice" clipPath={`url(#ph${i})`} />
-              <Circle cx={x + 16} cy={y} r={1.6} fill="#c9a26a" />
+            <G opacity={night ? 0.35 : 0.75}>
+              {RAINBOW.map((c, i) => (
+                <Path key={c} d={`M ${170 + i * 7} 196 A ${150 - i * 7} ${125 - i * 7} 0 0 1 ${470 - i * 7} 196`} stroke={c} strokeWidth={7} fill="none" />
+              ))}
             </G>
-          );
-        })}
+            <Cloud x={176} y={186} s={1.1} night={night} />
+            {!night && <Cloud x={250} y={36} s={0.55} night={night} />}
 
-        <G>
-          <Rect x={352} y={196} width={4} height={34} fill="#8a6a4a" />
-          <Path d="M338 186 h32 v14 h-32 z M338 186 a16 9 0 0 1 32 0" fill="#e8796b" />
-          {garden.letters > 0 && (
-            <>
-              <Rect x={370} y={178} width={3} height={16} fill="#7a5a3a" />
-              <Rect x={373} y={178} width={10} height={7} fill="#f5c542" />
-              <SvgText x={354} y={197} fontSize={9} fontWeight="bold" fill="#fff" textAnchor="middle">
-                {garden.letters}
-              </SvgText>
-            </>
-          )}
-        </G>
+            <Path d={`M0 200 Q90 160 200 190 T400 178 V${H} H0 Z`} fill={night ? "#5a7f6c" : "#c7e6b4"} />
+            <Path d={`M0 214 Q120 190 230 208 T400 204 V${H} H0 Z`} fill="url(#meadow)" />
 
-        {garden.flowers.filter((f) => f.depth < NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
+            <MemoryTree x={66} y={226} rings={garden.treeRings} night={night} />
 
-        {pet.favorites.toys.length > 0 && <Circle cx={252} cy={223} r={6} fill="#f08a5d" stroke="#fff" strokeWidth={1.5} />}
-        <G>
-          <Path d="M137 218 h30 l-4 10 h-22 z" fill="#6aa0d8" />
-          {garden.treats.length > 0 && <Ellipse cx={152} cy={218} rx={15} ry={3.5} fill="#c98a4b" />}
-        </G>
+            {/* the family's photos, hanging like polaroids on a string */}
+            {photos.length > 0 && <Path d="M8 98 Q70 122 128 100" stroke="#e9dcc6" strokeWidth={1.2} fill="none" />}
+            {photos.slice(0, 3).map((p, i) => {
+              const { x, y } = polaroid(i);
+              return (
+                <G key={p.id} onPress={onPhotoPress ? () => onPhotoPress(p) : undefined} transform={`rotate(${[-6, 4, -3][i]} ${x + 16} ${y})`}>
+                  <Rect x={x} y={y} width={32} height={36} fill="#fffdf8" />
+                  <SvgImage href={{ uri: p.uri }} x={x + 3} y={y + 3} width={26} height={24} preserveAspectRatio="xMidYMid slice" clipPath={`url(#ph${i})`} />
+                  <Circle cx={x + 16} cy={y} r={1.6} fill="#c9a26a" />
+                </G>
+              );
+            })}
 
-        {Array.from({ length: Math.min(garden.candlesLit, 5) }, (_, i) => (
-          <Candle key={i} x={292 + i * 14} y={262 - (i % 2) * 6} night={night} />
-        ))}
+            <G>
+              <Rect x={352} y={196} width={4} height={34} fill="#8a6a4a" />
+              <Path d="M338 186 h32 v14 h-32 z M338 186 a16 9 0 0 1 32 0" fill="#e8796b" />
+              {garden.letters > 0 && (
+                <>
+                  <Rect x={370} y={178} width={3} height={16} fill="#7a5a3a" />
+                  <Rect x={373} y={178} width={10} height={7} fill="#f5c542" />
+                  <SvgText x={354} y={197} fontSize={9} fontWeight="bold" fill="#fff" textAnchor="middle">
+                    {garden.letters}
+                  </SvgText>
+                </>
+              )}
+            </G>
+
+            {garden.flowers.filter((f) => f.depth < NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
+
+            {pet.favorites.toys.length > 0 && <Circle cx={252} cy={223} r={6} fill="#f08a5d" stroke="#fff" strokeWidth={1.5} />}
+            <G>
+              <Path d="M137 218 h30 l-4 10 h-22 z" fill="#6aa0d8" />
+              {garden.treats.length > 0 && <Ellipse cx={152} cy={218} rx={15} ry={3.5} fill="#c98a4b" />}
+            </G>
+
+            {Array.from({ length: Math.min(garden.candlesLit, 5) }, (_, i) => (
+              <Candle key={i} x={292 + i * 14} y={262 - (i % 2) * 6} night={night} />
+            ))}
+          </>
+        )}
       </Svg>
 
-      {k > 0 && <LivingPet pet={pet} at={at} pose={pose} k={k} heartsKey={heartsKey} onPress={onPetPress} />}
+      {k > 0 &&
+        (clip ? (
+          <RealPet name={pet.name} clip={clip} at={at} k={k} night={night} place={place} restartKey={restartKey} onPress={onPetPress} />
+        ) : (
+          <LivingPet pet={pet} at={at} pose={pose} k={k} heartsKey={heartsKey} onPress={onPetPress} />
+        ))}
 
       {/* near flowers stand in front of the pet */}
       <View style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }} pointerEvents="none">
         <Svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
-          {garden.flowers.filter((f) => f.depth >= NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
+          {/* nothing stands between you and a close-up */}
+          {photo ? !clip?.closeUp && <PhotoFront garden={garden} night={night} place={place} /> : garden.flowers.filter((f) => f.depth >= NEAR).map((f) => <FlowerAt key={f.id} f={f} />)}
         </Svg>
       </View>
     </View>
@@ -239,6 +270,97 @@ function LivingPet({ pet, at, pose, k, heartsKey, onPress }: { pet: PetProfile; 
     </Animated.View>
   );
 }
+
+/**
+ * The real pet, from the family's own footage. It stands on the meadow with a
+ * soft contact shadow, gets smaller as it goes further away, and only changes
+ * place at walking pace (the garden screen only moves it when there's footage
+ * of it walking). A close-up, where the pet runs off the bottom of the
+ * picture, is shown large and near, rising from the bottom of the scene as if
+ * it were right in front of you.
+ */
+function RealPet({
+  name,
+  clip,
+  at,
+  k,
+  night,
+  place,
+  restartKey,
+  onPress,
+}: {
+  name: string;
+  clip: VideoClip;
+  at: Spot;
+  k: number;
+  night: boolean;
+  place: Place;
+  restartKey?: number;
+  onPress?: () => void;
+}) {
+  const [ax] = useState(() => new Animated.Value(at.x));
+  const [ad] = useState(() => new Animated.Value(at.depth));
+  const [heading, setHeading] = useState<"left" | "right">(clip.facing);
+  const last = useRef(at);
+
+  useEffect(() => {
+    const from = last.current;
+    last.current = at;
+    if (Math.hypot(at.x - from.x, at.depth - from.depth) < 0.005) return;
+    if (Math.abs(at.x - from.x) > 0.01) setHeading(at.x < from.x ? "left" : "right");
+    const duration = walkMs(from, at);
+    const anim = Animated.parallel([
+      Animated.timing(ax, { toValue: at.x, duration, easing: Easing.linear, useNativeDriver: true }),
+      Animated.timing(ad, { toValue: at.depth, duration, easing: Easing.linear, useNativeDriver: true }),
+    ]);
+    anim.start();
+    return () => anim.stop();
+  }, [at, ax, ad]);
+
+  const flip = heading !== clip.facing;
+  const label = `Pet ${name}`;
+
+  if (clip.closeUp) {
+    const h = H * 0.7 * k;
+    return (
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: h }}>
+        <ClipPlayer clip={clip} height={h} flip={flip} night={night} restartKey={restartKey} />
+      </Pressable>
+    );
+  }
+
+  // Sized for the nearest spot, then scaled down with distance. Scaling happens about the box's
+  // centre, so the box is moved down by what the scaling takes off the bottom: the feet stay put.
+  // A dog of average height, at its real size on this photo's ground. Height on the ground grows
+  // linearly with depth, so scaling between the nearest and furthest spots is exact.
+  const near = DOG_METRES * unitsPerMetre(groundY(1, place), place);
+  const far = DOG_METRES * unitsPerMetre(groundY(0, place), place);
+  const h = near * k;
+  const w = Math.min((h * clip.width) / clip.height, 190 * k);
+  const scale = ad.interpolate({ inputRange: [0, 1], outputRange: [far / near, 1] });
+  const translateX = ax.interpolate({ inputRange: [0, 1], outputRange: [-w / 2, W * k - w / 2] });
+  const feetY = ad.interpolate({ inputRange: [0, 1], outputRange: [groundY(0, place) * k - h / 2, groundY(1, place) * k - h / 2] });
+  const translateY = Animated.add(feetY, Animated.multiply(scale, -h / 2));
+
+  return (
+    <Animated.View style={{ position: "absolute", left: 0, top: 0, width: w, height: h, transform: [{ translateX }, { translateY }, { scale }] }}>
+      <Svg width={w} height={h * 0.12} style={{ position: "absolute", left: 0, bottom: -h * 0.045 }}>
+        <Defs>
+          <RadialGradient id="contact" cx="0.5" cy="0.5" r="0.5">
+            <Stop offset="0" stopColor="#1d2a14" stopOpacity={0.32} />
+            <Stop offset="0.6" stopColor="#1d2a14" stopOpacity={0.12} />
+            <Stop offset="1" stopColor="#1d2a14" stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Ellipse cx={w / 2} cy={h * 0.06} rx={w * 0.42} ry={h * 0.05} fill="url(#contact)" />
+      </Svg>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={StyleSheet.absoluteFill}>
+        <ClipPlayer clip={clip} height={h} flip={flip} night={night} restartKey={restartKey} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 
 function Heart({ x, y, s }: { x: number; y: number; s: number }) {
   return <Path transform={`translate(${x} ${y}) scale(${s})`} d="M0 3 C-6 -3 -10 4 0 10 C10 4 6 -3 0 3 Z" fill="#f2788a" />;

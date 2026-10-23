@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
-import { SOUND_TAGS, type PetPhoto, type PetProfile, type SoundTag } from "@sinian/core";
+import { CLIP_ACTIONS, SOUND_TAGS, type ClipAction, type PetPhoto, type PetProfile, type SoundTag } from "@sinian/core";
 import { newId, today, useStore } from "../state/store";
-import { coatFromPhoto, forget, pickPhotos, pickRecording, play } from "../media";
+import { coatFromPhoto, forget, importVideoClip, pickPhotos, pickPlacePhoto, pickRecording, play } from "../media";
+import { PlaceEditor } from "../components/PlaceEditor";
+import { AliveCard } from "../components/AliveCard";
+import { PlayCard } from "../components/PlayCard";
+import { ClipPlayer } from "../components/ClipPlayer";
 import { PhotoViewer } from "../components/PhotoViewer";
 import { Button, Card, Chip, Note, colors, s } from "../ui";
 
@@ -18,19 +22,30 @@ const TAG_LABEL: Record<SoundTag, string> = {
   other: "Other",
 };
 
+const ACTION_LABEL: Record<ClipAction, string> = {
+  sit: "Sitting",
+  walk: "Walking",
+  play: "Playing",
+  bark: "Barking",
+  sleep: "Sleeping",
+  eat: "Eating",
+};
+
 /** Default tag for a new recording, by species. */
 const FIRST_TAG: Record<PetProfile["species"], SoundTag> = { dog: "bark", cat: "meow", bird: "chirp", rabbit: "happy", other: "happy" };
 
 /**
- * The family's own photos and recordings of the pet. Photos hang in the
- * garden and can set the storybook pet's colours; recordings are what the
- * pet sounds like when it reacts. Nothing leaves the phone.
+ * The family's own photos, videos and recordings of the pet. Photos hang in
+ * the garden and can set the storybook pet's colours; video clips replace the
+ * storybook pet with the real one; recordings are what the pet sounds like
+ * when it reacts. Nothing leaves the phone.
  */
 export function MemoriesScreen({ pet }: { pet: PetProfile }) {
   const { state, update } = useStore();
   const [viewing, setViewing] = useState<PetPhoto>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [cutting, setCutting] = useState<number>(); // progress of the clip being cut out, 0…1
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -79,10 +94,36 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
       update((st) => ({ ...st, sounds: [...st.sounds, { id: newId(), uri, tag: FIRST_TAG[pet.species] }] }));
     });
 
+  const addVideo = () =>
+    run(async () => {
+      const c = await importVideoClip(setCutting).finally(() => setCutting(undefined));
+      if (!c) return;
+      update((st) => ({ ...st, clips: [...st.clips, { ...c, id: newId(), action: st.clips.length ? "walk" : "sit" }] }));
+      setMessage(
+        c.cutout
+          ? `${pet.name} is in the garden now, just as in your video. Tag what they're doing in each clip.`
+          : `Couldn't separate ${pet.name} from the background in that video, so it shows framed. A clip where they stand out clearly works best.`,
+      );
+    });
+
+  const choosePlace = () =>
+    run(async () => {
+      const uri = await pickPlacePhoto();
+      if (!uri) return;
+      if (state.place) forget(state.place.uri);
+      update((st) => ({ ...st, place: { uri, horizon: 0.55 } }));
+      setMessage(`Drag the line to where the ground meets the distance, so ${pet.name} stands at the right size.`);
+    });
+
+  const meadowAgain = () => {
+    if (state.place) forget(state.place.uri);
+    update((st) => ({ ...st, place: undefined }));
+  };
+
   return (
     <View>
       <Text style={[s.h1, { marginBottom: 4 }]}>{`Memories of ${pet.name}`}</Text>
-      <Note>Your photos hang in the garden, and your recordings become {pet.name}&apos;s voice there. Everything stays on this phone.</Note>
+      <Note>Your photos hang in the garden, your videos bring {pet.name} into it, and your recordings become their voice there. Everything stays on this phone.</Note>
       {message && <Note>{message}</Note>}
 
       <Card title="Photos">
@@ -102,6 +143,78 @@ export function MemoriesScreen({ pet }: { pet: PetProfile }) {
           ))}
         </View>
         <Button label={busy ? "Working…" : "Add photos"} onPress={addPhotos} disabled={busy} />
+      </Card>
+
+      <Card title="Videos">
+        <Note>
+          Add short clips of {pet.name} (up to 8 seconds each) and tag what they&apos;re doing. {pet.name} is cut out of each clip on this phone and lives in the garden
+          exactly as in your footage. A barking clip brings its own bark. They can only do what your clips show.
+        </Note>
+        {state.clips.map((c) => (
+          <View key={c.id} style={{ paddingVertical: 8, borderBottomWidth: 0.5, borderColor: "#eee" }}>
+            <View style={[s.row, { alignItems: "center" }]}>
+              <View style={{ width: 96, height: 96, borderRadius: 10, backgroundColor: "#dcebd0", overflow: "hidden" }}>
+                <ClipPlayer clip={c} height={Math.min(96, (96 * c.height) / c.width)} />
+              </View>
+              {c.audioUri && (
+                <Text style={{ color: colors.accent }} onPress={() => play(c.audioUri!)}>
+                  ▶︎ Sound
+                </Text>
+              )}
+              <Text
+                style={{ color: colors.accent }}
+                accessibilityHint="Which way they face in this clip, so they walk forwards in the garden"
+                onPress={() => update((st) => ({ ...st, clips: st.clips.map((x) => (x.id === c.id ? { ...x, facing: x.facing === "left" ? "right" : "left" } : x)) }))}
+              >
+                {c.facing === "left" ? "← Facing left" : "Facing right →"}
+              </Text>
+              <Text
+                style={{ color: colors.danger }}
+                onPress={() => {
+                  forget(c.dir);
+                  update((st) => ({ ...st, clips: st.clips.filter((x) => x.id !== c.id) }));
+                }}
+              >
+                Remove
+              </Text>
+            </View>
+            <View style={[s.row, { marginTop: 6 }]}>
+              {CLIP_ACTIONS.map((a) => (
+                <Chip
+                  key={a}
+                  label={ACTION_LABEL[a]}
+                  on={c.action === a}
+                  onPress={() => update((st) => ({ ...st, clips: st.clips.map((x) => (x.id === c.id ? { ...x, action: a } : x)) }))}
+                />
+              ))}
+            </View>
+          </View>
+        ))}
+        {cutting !== undefined && <Note>{`Bringing ${pet.name} out of the video… ${Math.round(cutting * 100)}%`}</Note>}
+        <Button label={busy ? "Working…" : "Add a video"} onPress={addVideo} disabled={busy} />
+      </Card>
+
+      <PlayCard pet={pet} />
+
+      <AliveCard pet={pet} />
+
+      <Card title="Their place">
+        <Note>
+          {state.place
+            ? `${pet.name} lives here now. Drag the line to where the ground meets the distance; ${pet.name} is shown near and far at the size they'll be.`
+            : `Instead of the meadow, ${pet.name} can live somewhere they loved: your garden, the park, their spot by the window. Choose a photo taken at about their eye level, with open ground.`}
+        </Note>
+        {state.place && (
+          <PlaceEditor
+            place={state.place}
+            clip={state.clips.find((c) => !c.closeUp)}
+            onChange={(horizon) => update((st) => (st.place ? { ...st, place: { ...st.place, horizon } } : st))}
+          />
+        )}
+        <View style={[s.row, { marginTop: 10 }]}>
+          <Button label={busy ? "Working…" : state.place ? "Choose another photo" : "Choose a photo"} onPress={choosePlace} disabled={busy} />
+          {state.place && <Button label="Back to the meadow" kind="soft" onPress={meadowAgain} />}
+        </View>
       </Card>
 
       <Card title={`${pet.name}'s voice`}>

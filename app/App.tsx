@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { StoreProvider, useStore, type PetState } from "./src/state/store";
+import { StoreProvider, today, useStore, type PetState } from "./src/state/store";
+import { scheduleReminders } from "./src/reminders";
+import { refreshWidget } from "./src/widget";
+import { useAliveMaker } from "./src/alive/useAliveMaker";
 import { SetupScreen } from "./src/screens/SetupScreen";
 import { GardenScreen } from "./src/screens/GardenScreen";
 import { WishesScreen } from "./src/screens/WishesScreen";
@@ -21,6 +24,14 @@ type Tab = (typeof TABS)[number]["key"] | "edit";
 function Shell() {
   const { state, ready } = useStore();
   const [tab, setTab] = useState<Tab>("garden");
+  useAliveMaker();
+  // Keep the next year of remembrance-day reminders scheduled (or none, when they're off).
+  useEffect(() => {
+    if (ready) void scheduleReminders(state.pet, !!state.remindersOn, today()).catch(() => undefined);
+  }, [ready, state.pet, state.remindersOn]);
+  useEffect(() => {
+    if (ready) void refreshWidget(state.pet, state.clips, state.place, today());
+  }, [ready, state.pet, state.clips, state.place]);
   if (!ready) return null;
   const pet = state.pet;
 
